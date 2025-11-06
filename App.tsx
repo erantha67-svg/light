@@ -1,5 +1,3 @@
-
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './components/Button';
 import Card from './components/Card';
@@ -10,18 +8,180 @@ import ConnectionStatus from './components/ConnectionStatus';
 import PresetButton from './components/PresetButton';
 import { ToastProvider, useToast } from './components/Toast';
 import Dialog from './components/Dialog';
+import ScheduleDialog from './components/ScheduleDialog';
 import {
   FishIcon,
   CalendarIcon,
   PowerIcon,
   Loader2Icon,
   CloudIcon,
+  PaintbrushIcon,
+  SunriseIcon,
+  SunsetIcon,
 } from './components/icons';
 import { PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
-import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset } from './types';
+import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule } from './types';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
 const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
+const DEVICE_ALIASES_KEY = 'aquariumDeviceAliases';
+const SCHEDULES_KEY = 'aquariumSchedules';
+
+// Color conversion utilities
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  let r, g, b;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0');
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result ? {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16),
+  } : null;
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s, l = (max + min) / 2;
+  if (max === min) {
+    h = s = 0;
+  } else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return [h, s, l];
+}
+
+function calculateSpectrumColor(values: { red: number, green: number, blue: number, white: number, uv: number }): string {
+  const r_norm = values.red / 100;
+  const g_norm = values.green / 100;
+  const b_norm = values.blue / 100;
+  const w_norm = values.white / 100;
+  
+  // Mix RGB with White. As white increases, it washes out the color towards white.
+  const finalR = Math.round((r_norm * (1 - w_norm) + w_norm) * 255);
+  const finalG = Math.round((g_norm * (1 - w_norm) + w_norm) * 255);
+  const finalB = Math.round((b_norm * (1 - w_norm) + w_norm) * 255);
+
+  return rgbToHex(Math.min(255, finalR), Math.min(255, finalG), Math.min(255, finalB));
+}
+
+
+const ColorPicker: React.FC<{ color: string; onChange: (color: string) => void; disabled?: boolean; }> = ({ color, onChange, disabled }) => {
+  const [hsl, setHsl] = useState([0, 1, 0.5]);
+  const saturationRef = useRef<HTMLDivElement>(null);
+  const hueRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const rgb = hexToRgb(color);
+    if (rgb) {
+      setHsl(rgbToHsl(rgb.r, rgb.g, rgb.b));
+    }
+  }, [color]);
+
+  const handleSaturationChange = useCallback((e: React.MouseEvent | MouseEvent) => {
+    if (disabled || !saturationRef.current) return;
+    const { width, height, left, top } = saturationRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(width, e.clientX - left));
+    const y = Math.max(0, Math.min(height, e.clientY - top));
+    const newS = x / width;
+    const newL = 1 - y / height;
+    const newHsl: [number, number, number] = [hsl[0], newS, newL];
+    setHsl(newHsl);
+    const [r, g, b] = hslToRgb(newHsl[0], newHsl[1], newHsl[2]);
+    onChange(rgbToHex(r, g, b));
+  }, [hsl, onChange, disabled]);
+  
+  const handleHueChange = useCallback((e: React.MouseEvent | MouseEvent) => {
+    if (disabled || !hueRef.current) return;
+    const { width, left } = hueRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(width, e.clientX - left));
+    const newH = x / width;
+    const newHsl: [number, number, number] = [newH, hsl[1], hsl[2]];
+    setHsl(newHsl);
+    const [r, g, b] = hslToRgb(newHsl[0], newHsl[1], newHsl[2]);
+    onChange(rgbToHex(r, g, b));
+  }, [hsl, onChange, disabled]);
+  
+  const createDragHandler = (handler: (e: MouseEvent) => void) => (e: React.MouseEvent) => {
+    if(disabled) return;
+    e.preventDefault();
+    handler(e.nativeEvent);
+    const onMouseMove = (moveEvent: MouseEvent) => handler(moveEvent);
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const [h, s, l] = hsl;
+  const saturationBg = `hsl(${h * 360}, 100%, 50%)`;
+  const pickerX = s * 100;
+  const pickerY = (1 - l) * 100;
+  const huePickerX = h * 100;
+
+  return (
+    <div className={`space-y-4 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+      <div
+        ref={saturationRef}
+        className="relative w-full h-40 rounded-lg cursor-pointer border border-white/10"
+        style={{ backgroundColor: saturationBg }}
+        onMouseDown={createDragHandler(handleSaturationChange)}
+      >
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to right, white, transparent)' }} />
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, black, transparent)' }} />
+        <div
+          className="absolute w-5 h-5 rounded-full border-2 border-white shadow-md transform -translate-x-1/2 -translate-y-1/2"
+          style={{ left: `${pickerX}%`, top: `${pickerY}%` }}
+        />
+      </div>
+      <div
+        ref={hueRef}
+        className="relative w-full h-5 rounded-full cursor-pointer border border-white/10"
+        onMouseDown={createDragHandler(handleHueChange)}
+        style={{ background: 'linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)'}}
+      >
+        <div
+          className="absolute w-5 h-5 rounded-full border-2 border-white bg-white/30 shadow-md transform -translate-x-1/2 -translate-y-0"
+          style={{ left: `${huePickerX}%`, top: `50%`, transform: `translate(-50%, -50%)` }}
+        />
+      </div>
+    </div>
+  );
+};
+
 
 const AquariumControlPage: React.FC = () => {
   const [device, setDevice] = useState<MockBluetoothDevice | null>(null);
@@ -42,8 +202,56 @@ const AquariumControlPage: React.FC = () => {
   const [bridgeApiKey, setBridgeApiKey] = useState('');
   const [bridgeStatus, setBridgeStatus] = useState<'inactive' | 'connecting' | 'active' | 'error'>('inactive');
 
+  const [customColorMode, setCustomColorMode] = useState<'solid' | 'gradient' | 'spectrum'>('solid');
+  const [solidColor, setSolidColor] = useState('#3b82f6');
+  const [gradientStart, setGradientStart] = useState('#fb923c');
+  const [gradientEnd, setGradientEnd] = useState('#f472b6');
+  const [spectrumValues, setSpectrumValues] = useState({
+    red: 100,
+    green: 80,
+    blue: 90,
+    white: 50,
+    uv: 25,
+  });
+  
+  const [hexInputValue, setHexInputValue] = useState(solidColor);
+
+  const [isDeviceSettingsModalOpen, setIsDeviceSettingsModalOpen] = useState(false);
+  const [deviceAliases, setDeviceAliases] = useState<{ [key: string]: string }>({});
+  const [currentDeviceAlias, setCurrentDeviceAlias] = useState('');
+
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('controls');
+  const [gradientDuration, setGradientDuration] = useState(30);
+
   const scanRef = useRef<any>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  
+  const tabs = [
+    { id: 'controls', label: 'Controls' },
+    { id: 'custom', label: 'Custom Color' },
+    { id: 'schedules', label: 'Schedules' },
+    { id: 'bridge', label: 'Bridge' },
+  ];
+
+  useEffect(() => {
+    setHexInputValue(solidColor);
+  }, [solidColor]);
+
+  const handleHexInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setHexInputValue(e.target.value);
+  };
+
+  const handleHexInputBlur = () => {
+    const newColor = hexInputValue.startsWith('#') ? hexInputValue : `#${hexInputValue}`;
+    if (/^#([a-f\d]{6})$/i.test(newColor)) {
+      setSolidColor(newColor.toLowerCase());
+    } else {
+      setHexInputValue(solidColor);
+      addToast('Invalid HEX code. Must be #RRGGBB format.', 'error');
+    }
+  };
 
   useEffect(() => {
     try {
@@ -54,10 +262,26 @@ const AquariumControlPage: React.FC = () => {
         setBridgeServerUrl(serverUrl ?? '');
         setBridgeApiKey(apiKey ?? '');
       }
+      const savedAliases = localStorage.getItem(DEVICE_ALIASES_KEY);
+      if (savedAliases) {
+        setDeviceAliases(JSON.parse(savedAliases));
+      }
+      const savedSchedules = localStorage.getItem(SCHEDULES_KEY);
+      if (savedSchedules) {
+        setSchedules(JSON.parse(savedSchedules));
+      }
     } catch (error) {
-      console.error("Failed to load bridge config from localStorage", error);
+      console.error("Failed to load config from localStorage", error);
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCHEDULES_KEY, JSON.stringify(schedules));
+    } catch (error) {
+      console.error("Failed to save schedules to localStorage", error);
+    }
+  }, [schedules]);
 
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
@@ -146,58 +370,15 @@ const AquariumControlPage: React.FC = () => {
       scanRef.current.stop();
       scanRef.current = null;
     }
-    navigator.bluetooth.removeEventListener('advertisementreceived', handleAdvertisement);
+    if (navigator.bluetooth?.removeEventListener) {
+      navigator.bluetooth.removeEventListener('advertisementreceived', handleAdvertisement);
+    }
     setIsScanning(false);
   }, []);
 
-  const startScan = async () => {
-    if (!navigator.bluetooth) {
-      addToast('Bluetooth not supported. Please use a compatible browser.', 'error');
-      return;
-    }
-
-    if (!navigator.bluetooth.requestLEScan) {
-      addToast('Device scanning not supported. Using default chooser.', 'info');
-      await manualConnect();
-      return;
-    }
-
-    setIsScanModalOpen(true);
-    setIsScanning(true);
-    setScannedDevices([]);
-
-    try {
-      // FIX: Combined filters into a single object for a more specific scan.
-      const scan = await navigator.bluetooth.requestLEScan({
-        filters: [
-          { services: [SERVICE_UUID.toLowerCase()], name: DEVICE_NAME }
-        ],
-      });
-      scanRef.current = scan;
-      navigator.bluetooth.addEventListener('advertisementreceived', handleAdvertisement);
-      
-      setTimeout(() => {
-        if(scanRef.current){
-           stopScan();
-           addToast('Scan finished.', 'info');
-        }
-      }, 15000); // Stop scan after 15 seconds
-
-    } catch (error) {
-       addToast('Could not start device scan.', 'error');
-       setIsScanning(false);
-    }
-  };
-  
-  const onSelectDevice = (selectedDevice: MockBluetoothDevice) => {
-    stopScan();
-    connectToSelectedDevice(selectedDevice);
-  };
-  
   const manualConnect = async () => {
     try {
       const DFU_SERVICE_UUID = '4169726f-6861-4446-5553-657276696365';
-      // FIX: Combined filters into a single object for a more specific device request.
       const bluetoothDevice = await navigator.bluetooth.requestDevice({
         filters: [
           { services: [SERVICE_UUID.toLowerCase()], name: DEVICE_NAME }
@@ -221,6 +402,49 @@ const AquariumControlPage: React.FC = () => {
     }
   };
 
+  const startScan = async () => {
+    if (!navigator.bluetooth) {
+      addToast('Bluetooth not supported. Please use a compatible browser.', 'error');
+      return;
+    }
+
+    if (!navigator.bluetooth.requestLEScan) {
+      addToast('Device scanning not supported. Using default chooser.', 'info');
+      await manualConnect();
+      return;
+    }
+
+    setIsScanModalOpen(true);
+    setIsScanning(true);
+    setScannedDevices([]);
+
+    try {
+      const scan = await navigator.bluetooth.requestLEScan({
+        filters: [
+          { services: [SERVICE_UUID.toLowerCase()] }
+        ],
+      });
+      scanRef.current = scan;
+      navigator.bluetooth.addEventListener('advertisementreceived', handleAdvertisement);
+      
+      setTimeout(() => {
+        if(scanRef.current){
+           stopScan();
+           addToast('Scan finished.', 'info');
+        }
+      }, 15000); 
+
+    } catch (error) {
+       addToast('Could not start device scan.', 'error');
+       setIsScanning(false);
+    }
+  };
+  
+  const onSelectDevice = (selectedDevice: MockBluetoothDevice) => {
+    stopScan();
+    connectToSelectedDevice(selectedDevice);
+  };
+  
   const sendCommand = useCallback(async (command: string) => {
     if (!characteristic || !isConnected) {
       addToast('Not connected to device', 'error');
@@ -313,6 +537,42 @@ const AquariumControlPage: React.FC = () => {
     await sendCommand(`PRESET:${preset.id.toUpperCase()}`);
     addToast(`${preset.name} preset activated`, 'success');
   }, [sendCommand, addToast]);
+  
+  const handleSpectrumChange = useCallback((channel: keyof typeof spectrumValues, value: number) => {
+    setSpectrumValues(prev => ({ ...prev, [channel]: value }));
+  }, []);
+
+  const handleApplyCustomColor = useCallback(async () => {
+    let command = '';
+    let toastMessage = 'Custom lighting applied';
+    if (customColorMode === 'solid') {
+      command = `COLOR_HEX:${solidColor.substring(1)}`;
+    } else if (customColorMode === 'gradient') {
+      command = `GRADIENT_HEX:${gradientStart.substring(1)}:${gradientEnd.substring(1)}`;
+    } else if (customColorMode === 'spectrum') {
+      const { red, green, blue, white, uv } = spectrumValues;
+      command = `SPECTRUM:${red}:${green}:${blue}:${white}:${uv}`;
+      toastMessage = 'Spectrum settings applied';
+    }
+
+    if (command) {
+      setActivePreset(null);
+      await sendCommand(command);
+      addToast(toastMessage, 'success');
+    }
+  }, [customColorMode, solidColor, gradientStart, gradientEnd, spectrumValues, sendCommand, addToast]);
+
+  const handleStartSunrise = useCallback(async () => {
+    setActivePreset(null);
+    await sendCommand(`SUNRISE:${gradientDuration}`);
+    addToast(`Sunrise effect started (${gradientDuration} min)`, 'success');
+  }, [sendCommand, addToast, gradientDuration]);
+
+  const handleStartSunset = useCallback(async () => {
+    setActivePreset(null);
+    await sendCommand(`SUNSET:${gradientDuration}`);
+    addToast(`Sunset effect started (${gradientDuration} min)`, 'success');
+  }, [sendCommand, addToast, gradientDuration]);
 
   const requestDisconnect = () => {
     setIsDisconnectConfirmOpen(true);
@@ -354,10 +614,72 @@ const AquariumControlPage: React.FC = () => {
     }
   };
 
+  const handleOpenDeviceSettings = () => {
+    if (!device) return;
+    setCurrentDeviceAlias(deviceAliases[device.id] || device.name || '');
+    setIsDeviceSettingsModalOpen(true);
+  };
+
+  const handleSaveDeviceSettings = () => {
+    if (!device) return;
+    const newAliases = { ...deviceAliases, [device.id]: currentDeviceAlias };
+    setDeviceAliases(newAliases);
+    try {
+      localStorage.setItem(DEVICE_ALIASES_KEY, JSON.stringify(newAliases));
+      addToast('Device settings saved', 'success');
+    } catch (error) {
+      addToast('Failed to save settings', 'error');
+    }
+    setIsDeviceSettingsModalOpen(false);
+  };
+
+  const handleSyncSchedules = useCallback(async () => {
+    addToast('Syncing schedules with device...', 'info');
+    await sendCommand('SCHEDULE_CLEAR');
+    await new Promise(resolve => setTimeout(resolve, 100)); // Wait for device to process clear
+
+    for (const [index, schedule] of schedules.entries()) {
+        const { enabled, startTime, endTime, days, action } = schedule;
+        const startTimeStr = startTime.replace(':', '');
+        const endTimeStr = endTime.replace(':', '');
+        const daysStr = days.map(d => d ? '1' : '0').join('');
+        const command = `SCHEDULE_ADD:${index},${enabled ? 1 : 0},${startTimeStr},${endTimeStr},${daysStr},${action.type},${action.value.replace('#', '')}`;
+        await sendCommand(command);
+        await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between commands
+    }
+    addToast('Schedules synced successfully!', 'success');
+    setIsScheduleModalOpen(false);
+  }, [schedules, sendCommand, addToast]);
+
+  const displayedDeviceName = (device && deviceAliases[device.id]) || device?.name;
+
+  const SpectrumSlider: React.FC<{
+    channel: string;
+    value: number;
+    onChange: (channel: any, value: number) => void;
+    trackClassName: string;
+    disabled: boolean;
+  }> = ({ channel, value, onChange, trackClassName, disabled }) => (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <label className="font-semibold text-white capitalize">{channel}</label>
+        <Badge variant="outline">{value}%</Badge>
+      </div>
+      <Slider
+        value={[value]}
+        onValueChange={([newValue]) => onChange(channel, newValue)}
+        max={100}
+        step={1}
+        trackClassName={trackClassName}
+        disabled={disabled}
+      />
+    </div>
+  );
+
   return (
     <>
       <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
-        <div className="max-w-2xl w-full mx-auto space-y-8">
+        <div className="max-w-2xl w-full mx-auto space-y-6">
           <div className="text-center space-y-2">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 mb-4">
               <FishIcon className="w-8 h-8 text-white" />
@@ -366,108 +688,316 @@ const AquariumControlPage: React.FC = () => {
             <p className="text-gray-400">Control your AQ-S lighting system</p>
           </div>
 
-          <Card className="p-6 space-y-6">
-            <ConnectionStatus isConnected={isConnected} isConnecting={isConnecting} onConnect={startScan} onDisconnect={requestDisconnect} />
-
-            <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
-              <div className="flex items-center gap-4">
-                <PowerIcon className="w-6 h-6 text-white" />
-                <h3 className="text-lg font-semibold text-white">Master Power</h3>
-              </div>
-              <Switch checked={isPowerOn} onCheckedChange={handlePowerToggle} disabled={!isConnected} />
-            </div>
-
-            <div className="space-y-4 pt-2">
-              <div className="flex items-center justify-between">
-                <label className="text-lg font-semibold text-white">Master Brightness</label>
-                <Badge variant="outline">{brightness[0]}%</Badge>
-              </div>
-              <div className="space-y-2 pt-2">
-                <Slider value={brightness} onValueChange={handleBrightnessChange} max={100} step={1} disabled={!isConnected || !isPowerOn} className="w-full" />
-                <div className="flex justify-between text-xs text-gray-400">
-                  <span>0%</span>
-                  <span>50%</span>
-                  <span>100%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              <h3 className="text-xl font-semibold text-white mb-4">Lighting Presets</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {PRESETS.map((preset) => (
-                  <PresetButton key={preset.id} preset={preset} isActive={activePreset === preset.id} isDisabled={!isConnected || !isPowerOn} onClick={() => handlePresetSelect(preset)} />
-                ))}
-              </div>
-            </div>
-            
-            <div className="pt-4">
-              <Button variant="outline" className="w-full">
-                <CalendarIcon className="w-4 h-4 mr-2" /> View Schedules
-              </Button>
-            </div>
+          <Card className="p-6">
+            <ConnectionStatus
+              isConnected={isConnected}
+              isConnecting={isConnecting}
+              onConnect={startScan}
+              onDisconnect={requestDisconnect}
+              onOpenSettings={handleOpenDeviceSettings}
+              deviceName={displayedDeviceName}
+            />
           </Card>
           
-          <Card className="p-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <CloudIcon className="w-6 h-6 text-white" />
-                <h3 className="text-lg font-semibold text-white">Bridge Mode</h3>
-              </div>
-              <Switch
-                checked={isBridgeModeEnabled}
-                onCheckedChange={handleBridgeToggle}
-                disabled={!isConnected || !bridgeServerUrl}
-              />
+          <div>
+            <div className="border-b border-[#30363D]">
+              <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`whitespace-nowrap py-4 px-1 border-b-2 text-sm font-medium transition-colors ${
+                      activeTab === tab.id
+                        ? 'border-purple-500 text-purple-400'
+                        : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
             </div>
-            <p className="text-sm text-gray-400 -mt-2">
-              Control your light remotely. This device will act as a bridge, staying connected to the light and listening for commands from the server.
-            </p>
 
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="serverUrl" className="block text-sm font-medium text-gray-300 mb-2">
-                  Server URL
-                </label>
-                <input
-                  id="serverUrl"
-                  type="text"
-                  className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                  placeholder="wss://your-bridge-server.com"
-                  value={bridgeServerUrl}
-                  onChange={(e) => setBridgeServerUrl(e.target.value)}
-                />
-              </div>
-              <div>
-                <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">
-                  API Key
-                </label>
-                <input
-                  id="apiKey"
-                  type="password"
-                  className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                  placeholder="Enter your secret API key"
-                  value={bridgeApiKey}
-                  onChange={(e) => setBridgeApiKey(e.target.value)}
-                />
-              </div>
+            <div className="pt-6">
+              {activeTab === 'controls' && (
+                <div className="space-y-6">
+                  <Card className="p-6 space-y-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        <PowerIcon className="w-6 h-6 text-white" />
+                        <h3 className="text-lg font-semibold text-white">Master Power</h3>
+                      </div>
+                      <Switch checked={isPowerOn} onCheckedChange={handlePowerToggle} disabled={!isConnected} />
+                    </div>
+
+                    <div className="space-y-4 pt-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-lg font-semibold text-white">Master Brightness</label>
+                        <Badge variant="outline">{brightness[0]}%</Badge>
+                      </div>
+                      <div className="space-y-2 pt-2">
+                        <Slider value={brightness} onValueChange={handleBrightnessChange} max={100} step={1} disabled={!isConnected || !isPowerOn} className="w-full" />
+                        <div className="flex justify-between text-xs text-gray-400">
+                          <span>0%</span>
+                          <span>50%</span>
+                          <span>100%</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      <h3 className="text-xl font-semibold text-white mb-4">Lighting Presets</h3>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        {PRESETS.map((preset) => (
+                          <PresetButton key={preset.id} preset={preset} isActive={activePreset === preset.id} isDisabled={!isConnected || !isPowerOn} onClick={() => handlePresetSelect(preset)} />
+                        ))}
+                      </div>
+                    </div>
+                  </Card>
+                  
+                   <Card className="p-6 space-y-6">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-lg font-semibold text-white">Sunrise & Sunset Simulation</h3>
+                        <Badge variant="outline">{gradientDuration} min</Badge>
+                      </div>
+                      <p className="text-sm text-gray-400">
+                        Simulate a natural lighting cycle. The light will gradually change over the selected duration.
+                      </p>
+                      <Slider
+                        value={[gradientDuration]}
+                        onValueChange={(value) => setGradientDuration(value[0])}
+                        min={5}
+                        max={60}
+                        step={5}
+                        disabled={!isConnected || !isPowerOn}
+                      />
+                      <div className="flex justify-between text-xs text-gray-400">
+                        <span>5 min</span>
+                        <span>60 min</span>
+                      </div>
+                    </div>
+                    <div
+                      className="w-full h-10 rounded-lg border border-white/10"
+                      style={{
+                        background: 'linear-gradient(to right, #1e293b, #f97316, #fde047, #60a5fa, #1e293b)'
+                      }}
+                      aria-label="Sunrise/Sunset Color Preview"
+                    />
+                    <div className="grid grid-cols-2 gap-4 pt-2">
+                      <Button onClick={handleStartSunrise} disabled={!isConnected || !isPowerOn} variant="outline">
+                        <SunriseIcon className="w-4 h-4 mr-2"/>
+                        Start Sunrise
+                      </Button>
+                      <Button onClick={handleStartSunset} disabled={!isConnected || !isPowerOn} variant="outline">
+                        <SunsetIcon className="w-4 h-4 mr-2"/>
+                        Start Sunset
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
+              )}
+              {activeTab === 'custom' && (
+                <Card className="p-6 space-y-6">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <PaintbrushIcon className="w-6 h-6 text-white" />
+                      <h3 className="text-lg font-semibold text-white">Custom Color</h3>
+                    </div>
+                    <div className="flex items-center p-1 rounded-lg bg-[#0D1117] border border-[#30363D] self-stretch sm:self-center">
+                      <Button
+                        variant={customColorMode === 'solid' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setCustomColorMode('solid')}
+                        className={`w-full ${customColorMode === 'solid' ? 'shadow-md shadow-purple-500/20' : ''}`}
+                      >
+                        Solid
+                      </Button>
+                      <Button
+                        variant={customColorMode === 'gradient' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setCustomColorMode('gradient')}
+                        className={`w-full ${customColorMode === 'gradient' ? 'shadow-md shadow-purple-500/20' : ''}`}
+                      >
+                        Gradient
+                      </Button>
+                      <Button
+                        variant={customColorMode === 'spectrum' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setCustomColorMode('spectrum')}
+                        className={`w-full ${customColorMode === 'spectrum' ? 'shadow-md shadow-purple-500/20' : ''}`}
+                      >
+                        Spectrum
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4 pt-2">
+                    {customColorMode === 'solid' ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                          <label className="font-semibold text-white">
+                            Color
+                          </label>
+                          <div className="flex items-center gap-2 rounded-lg bg-[#0D1117] border border-[#30363D] px-3 py-1.5 focus-within:ring-2 focus-within:ring-purple-500">
+                            <div className="w-6 h-6 rounded-md border border-white/10" style={{ backgroundColor: solidColor }}></div>
+                            <input
+                              type="text"
+                              value={hexInputValue}
+                              onChange={handleHexInputChange}
+                              onBlur={handleHexInputBlur}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-24 bg-transparent text-sm text-gray-300 uppercase font-mono focus:outline-none"
+                              disabled={!isConnected || !isPowerOn}
+                              aria-label="Solid Color Hex Input"
+                            />
+                          </div>
+                        </div>
+                        <ColorPicker color={solidColor} onChange={setSolidColor} disabled={!isConnected || !isPowerOn} />
+                      </div>
+                    ) : customColorMode === 'gradient' ? (
+                      <div className="grid gap-6 grid-cols-1 sm:grid-cols-2">
+                        <div className="flex items-center gap-3">
+                          <input
+                            id="color1"
+                            type="color"
+                            value={gradientStart}
+                            onChange={(e) => setGradientStart(e.target.value)}
+                            className="w-12 h-12 bg-transparent border-none rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={!isConnected || !isPowerOn}
+                            aria-label="Start Color"
+                          />
+                          <div>
+                            <label htmlFor="color1" className="font-semibold text-white">
+                              Start
+                            </label>
+                            <p className="text-sm text-gray-400 uppercase">
+                              {gradientStart}
+                            </p>
+                          </div>
+                        </div>
+                         <div className="flex items-center gap-3">
+                          <input
+                            id="color2"
+                            type="color"
+                            value={gradientEnd}
+                            onChange={(e) => setGradientEnd(e.target.value)}
+                            className="w-12 h-12 bg-transparent border-none rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={!isConnected || !isPowerOn}
+                            aria-label="End Color"
+                          />
+                          <div>
+                            <label htmlFor="color2" className="font-semibold text-white">
+                              End
+                            </label>
+                            <p className="text-sm text-gray-400 uppercase">
+                              {gradientEnd}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        <SpectrumSlider channel="red" value={spectrumValues.red} onChange={handleSpectrumChange} trackClassName="bg-red-500" disabled={!isConnected || !isPowerOn} />
+                        <SpectrumSlider channel="green" value={spectrumValues.green} onChange={handleSpectrumChange} trackClassName="bg-green-500" disabled={!isConnected || !isPowerOn} />
+                        <SpectrumSlider channel="blue" value={spectrumValues.blue} onChange={handleSpectrumChange} trackClassName="bg-blue-500" disabled={!isConnected || !isPowerOn} />
+                        <SpectrumSlider channel="white" value={spectrumValues.white} onChange={handleSpectrumChange} trackClassName="bg-gray-200" disabled={!isConnected || !isPowerOn} />
+                        <SpectrumSlider channel="uv" value={spectrumValues.uv} onChange={handleSpectrumChange} trackClassName="bg-violet-500" disabled={!isConnected || !isPowerOn} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                      className="w-full h-10 rounded-lg border border-white/10"
+                      style={{
+                        background: customColorMode === 'solid'
+                          ? solidColor
+                          : customColorMode === 'gradient'
+                          ? `linear-gradient(to right, ${gradientStart}, ${gradientEnd})`
+                          : calculateSpectrumColor(spectrumValues)
+                      }}
+                      aria-label="Color Preview"
+                    ></div>
+
+                  <div className="pt-2">
+                      <Button onClick={handleApplyCustomColor} disabled={!isConnected || !isPowerOn} className="w-full">
+                          {customColorMode === 'spectrum' ? 'Apply Spectrum' : 'Apply Custom Color'}
+                      </Button>
+                  </div>
+                </Card>
+              )}
+              {activeTab === 'schedules' && (
+                <Card className="p-6">
+                   <p className="text-gray-400 mb-4 text-center">Set up automated lighting schedules for different times and days to simulate a natural environment.</p>
+                  <Button variant="outline" className="w-full" onClick={() => setIsScheduleModalOpen(true)}>
+                    <CalendarIcon className="w-4 h-4 mr-2" /> Manage Schedules
+                  </Button>
+                </Card>
+              )}
+              {activeTab === 'bridge' && (
+                <Card className="p-6 space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <CloudIcon className="w-6 h-6 text-white" />
+                      <h3 className="text-lg font-semibold text-white">Bridge Mode</h3>
+                    </div>
+                    <Switch
+                      checked={isBridgeModeEnabled}
+                      onCheckedChange={handleBridgeToggle}
+                      disabled={!isConnected || !bridgeServerUrl}
+                    />
+                  </div>
+                  <p className="text-sm text-gray-400 -mt-2">
+                    Control your light remotely. This device will act as a bridge, staying connected to the light and listening for commands from the server.
+                  </p>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label htmlFor="serverUrl" className="block text-sm font-medium text-gray-300 mb-2">
+                        Server URL
+                      </label>
+                      <input
+                        id="serverUrl"
+                        type="text"
+                        className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="wss://your-bridge-server.com"
+                        value={bridgeServerUrl}
+                        onChange={(e) => setBridgeServerUrl(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">
+                        API Key
+                      </label>
+                      <input
+                        id="apiKey"
+                        type="password"
+                        className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                        placeholder="Enter your secret API key"
+                        value={bridgeApiKey}
+                        onChange={(e) => setBridgeApiKey(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-gray-300">Status:</span>
+                      <Badge variant={bridgeStatus === 'active' ? 'default' : 'outline'} className={
+                          bridgeStatus === 'active' ? 'bg-green-600/50 border-green-500/50 text-green-300' :
+                          bridgeStatus === 'error' ? 'bg-red-600/50 border-red-500/50 text-red-300' :
+                          ''
+                      }>
+                        {bridgeStatus.charAt(0).toUpperCase() + bridgeStatus.slice(1)}
+                      </Badge>
+                    </div>
+                    <Button onClick={handleSaveBridgeConfig} size="sm">
+                      Save Config
+                    </Button>
+                  </div>
+                </Card>
+              )}
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-300">Status:</span>
-                <Badge variant={bridgeStatus === 'active' ? 'default' : 'outline'} className={
-                    bridgeStatus === 'active' ? 'bg-green-600/50 border-green-500/50 text-green-300' :
-                    bridgeStatus === 'error' ? 'bg-red-600/50 border-red-500/50 text-red-300' :
-                    ''
-                }>
-                  {bridgeStatus.charAt(0).toUpperCase() + bridgeStatus.slice(1)}
-                </Badge>
-              </div>
-              <Button onClick={handleSaveBridgeConfig} size="sm">
-                Save Config
-              </Button>
-            </div>
-          </Card>
+          </div>
         </div>
       </div>
       <Dialog
@@ -479,7 +1009,7 @@ const AquariumControlPage: React.FC = () => {
             {isScanning ? 'Scanning for Devices...' : 'Available Devices'}
           </div>
         }
-        description="Select your AQ-S device from the list below."
+        description="Select your AQ-S device from the list below, or connect manually."
       >
         <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
           {scannedDevices.length > 0 ? (
@@ -498,7 +1028,14 @@ const AquariumControlPage: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="mt-6">
+        <div className="mt-6 space-y-3">
+           <Button
+              variant="ghost"
+              onClick={manualConnect}
+              className="w-full"
+            >
+              Connect Manually
+            </Button>
            <Button
               variant="outline"
               onClick={() => {
@@ -532,6 +1069,58 @@ const AquariumControlPage: React.FC = () => {
             </Button>
         </div>
       </Dialog>
+      <Dialog
+        open={isDeviceSettingsModalOpen}
+        onOpenChange={setIsDeviceSettingsModalOpen}
+        title="Device Settings"
+        description={`Manage settings for ${displayedDeviceName || 'your device'}.`}
+      >
+        <div className="mt-4 space-y-6">
+            <div className="space-y-2">
+                <label htmlFor="deviceName" className="block text-sm font-medium text-gray-300">
+                    Device Nickname
+                </label>
+                <input
+                    id="deviceName"
+                    type="text"
+                    className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    placeholder="e.g., Living Room Light"
+                    value={currentDeviceAlias}
+                    onChange={(e) => setCurrentDeviceAlias(e.target.value)}
+                />
+            </div>
+            <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-300">
+                    Signal Strength
+                </label>
+                <Slider value={[80]} onValueChange={() => {}} max={100} step={1} disabled={true} />
+                <p className="text-xs text-gray-500 pt-1">
+                    This setting is not available for this device.
+                </p>
+            </div>
+        </div>
+        <div className="mt-8 flex justify-end gap-3">
+            <Button
+                variant="outline"
+                onClick={() => setIsDeviceSettingsModalOpen(false)}
+            >
+                Cancel
+            </Button>
+            <Button
+                onClick={handleSaveDeviceSettings}
+            >
+                Save Changes
+            </Button>
+        </div>
+      </Dialog>
+      <ScheduleDialog
+        open={isScheduleModalOpen}
+        onOpenChange={setIsScheduleModalOpen}
+        schedules={schedules}
+        onSchedulesChange={setSchedules}
+        onSync={handleSyncSchedules}
+        disabled={!isConnected}
+      />
     </>
   );
 };

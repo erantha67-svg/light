@@ -39,6 +39,19 @@ export interface ToastMessage {
   type: 'success' | 'info' | 'error';
 }
 
+export interface Schedule {
+  id: string;
+  enabled: boolean;
+  startTime: string; // "HH:mm"
+  endTime: string; // "HH:mm"
+  days: boolean[]; // [M, T, W, T, F, S, S]
+  action: {
+    type: 'preset' | 'color' | 'power_off';
+    value: string; // preset.id, hex color, or 'off'
+    name: string; // "Preset: Clear White", "Color: #ff0000", "Power Off"
+  };
+}
+
 // Fix for: Property 'bluetooth' does not exist on type 'Navigator'.
 // Corrected Bluetooth filter options to allow for filtering by name and other properties.
 interface BluetoothDeviceFilter {

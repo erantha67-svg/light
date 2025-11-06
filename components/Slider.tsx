@@ -1,4 +1,3 @@
-
 import React, { useCallback } from 'react';
 
 interface SliderProps {
@@ -6,27 +5,31 @@ interface SliderProps {
   onValueChange: (value: number[]) => void;
   max: number;
   step: number;
+  min?: number;
   disabled?: boolean;
   className?: string;
+  trackClassName?: string;
 }
 
-const Slider: React.FC<SliderProps> = ({ value, onValueChange, max, step, disabled, className }) => {
+const Slider: React.FC<SliderProps> = ({ value, onValueChange, max, step, min = 0, disabled, className, trackClassName }) => {
   const handleValueChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     onValueChange([parseInt(event.target.value, 10)]);
   }, [onValueChange]);
 
-  const progress = (value[0] / max) * 100;
+  const progress = ((value[0] - min) / (max - min)) * 100;
+  
+  const trackClasses = trackClassName || 'bg-gradient-to-r from-purple-500 to-pink-500';
 
   return (
     <div className={`relative w-full h-2 flex items-center ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}>
       <div className="absolute top-0 left-0 h-2 rounded-full bg-[#30363D] w-full" />
       <div 
-        className="absolute top-0 left-0 h-2 rounded-l-full bg-gradient-to-r from-purple-500 to-pink-500 pointer-events-none"
+        className={`absolute top-0 left-0 h-2 rounded-l-full pointer-events-none ${trackClasses}`}
         style={{ width: `${progress}%` }}
       />
       <input
         type="range"
-        min={0}
+        min={min}
         max={max}
         step={step}
         value={value[0]}
