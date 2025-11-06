@@ -101,12 +101,8 @@ interface WebBluetooth {
   requestDevice: (options: RequestDeviceOptions) => Promise<MockBluetoothDevice>;
   getDevices: () => Promise<MockBluetoothDevice[]>;
   requestLEScan: (options: BluetoothLEScanOptions) => Promise<BluetoothLEScan>;
-  // Fix: Add getAvailability method and overload addEventListener/removeEventListener for 'availabilitychanged' event.
-  getAvailability?: () => Promise<boolean>;
-  addEventListener(type: 'advertisementreceived', listener: (event: BluetoothAdvertisingEvent) => void): void;
-  addEventListener(type: 'availabilitychanged', listener: (event: Event) => void): void;
-  removeEventListener(type: 'advertisementreceived', listener: (event: BluetoothAdvertisingEvent) => void): void;
-  removeEventListener(type: 'availabilitychanged', listener: (event: Event) => void): void;
+  addEventListener: (event: 'advertisementreceived', callback: (event: BluetoothAdvertisingEvent) => void) => void;
+  removeEventListener: (event: 'advertisementreceived', callback: (event: BluetoothAdvertisingEvent) => void) => void;
 }
 
 declare global {

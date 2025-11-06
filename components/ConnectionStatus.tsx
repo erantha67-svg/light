@@ -11,7 +11,6 @@ interface ConnectionStatusProps {
   onDisconnect: () => void;
   onOpenSettings: () => void;
   deviceName?: string | null;
-  isBluetoothAvailable: boolean;
 }
 
 const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
@@ -21,7 +20,6 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   onDisconnect,
   onOpenSettings,
   deviceName,
-  isBluetoothAvailable,
 }) => {
   return (
     <div className="p-4 rounded-xl bg-white/5">
@@ -29,17 +27,15 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
         <div className="flex items-center space-x-3 w-full sm:w-auto">
           {isConnected ? (
             <BluetoothIcon className="w-6 h-6 text-green-400 flex-shrink-0" />
-          ) : isBluetoothAvailable ? (
-            <BluetoothOffIcon className="w-6 h-6 text-red-400 flex-shrink-0" />
           ) : (
-            <BluetoothOffIcon className="w-6 h-6 text-gray-500 flex-shrink-0" />
+            <BluetoothOffIcon className="w-6 h-6 text-red-400 flex-shrink-0" />
           )}
           <div>
             <p className="font-semibold text-white">
-              {isConnected ? deviceName || 'Connected' : isBluetoothAvailable ? 'Disconnected' : 'Bluetooth Off'}
+              {isConnected ? deviceName || 'Connected' : 'Disconnected'}
             </p>
             <p className="text-xs text-gray-400">
-              {isConnecting ? 'Attempting to connect...' : isConnected ? 'Device is ready' : isBluetoothAvailable ? 'Ready to connect' : 'Enable Bluetooth to continue'}
+              {isConnecting ? 'Attempting to connect...' : isConnected ? 'Device is ready' : 'Ready to connect'}
             </p>
           </div>
         </div>
@@ -64,7 +60,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
             </Button>
           </div>
         ) : (
-          <Button onClick={onConnect} disabled={isConnecting || !isBluetoothAvailable} className="w-full sm:w-auto flex-shrink-0">
+          <Button onClick={onConnect} disabled={isConnecting} className="w-full sm:w-auto flex-shrink-0">
             {isConnecting ? (
               <>
                 <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />

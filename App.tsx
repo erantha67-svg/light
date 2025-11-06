@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
 import Button from './components/Button';
@@ -29,6 +30,9 @@ import {
   ClipboardIcon,
   ClipboardCheckIcon,
   SparklesIcon,
+  SunIcon,
+  MoonIcon,
+  ZapIcon,
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID_NOTIFY, CHARACTERISTIC_UUID_WRITE } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
@@ -157,9 +161,6 @@ const AquariumControlPage: React.FC = () => {
   const [isFactoryResetConfirmOpen, setIsFactoryResetConfirmOpen] = useState(false);
   const scanRef = useRef<any>(null);
   
-  // Bluetooth availability state
-  const [isBluetoothAvailable, setIsBluetoothAvailable] = useState(true);
-  
   // Bridge state (WebRTC)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -195,48 +196,6 @@ const AquariumControlPage: React.FC = () => {
   useEffect(() => {
     setPlaceholderPrompt(placeholderPrompts[Math.floor(Math.random() * placeholderPrompts.length)]);
   }, []);
-
-  useEffect(() => {
-    if (!('bluetooth' in navigator)) {
-      setIsBluetoothAvailable(false);
-      addToast('Web Bluetooth is not supported on this browser.', 'error');
-      return;
-    }
-
-    const checkAvailability = async () => {
-      if (navigator.bluetooth.getAvailability) {
-        try {
-          const available = await navigator.bluetooth.getAvailability();
-          setIsBluetoothAvailable(available);
-          if (!available) {
-            addToast('Please enable Bluetooth to connect.', 'info');
-          }
-        } catch (err) {
-          console.warn('Could not check Bluetooth availability.', err);
-          setIsBluetoothAvailable(true); // Assume available if API fails to avoid blocking UI
-        }
-      }
-    };
-    checkAvailability();
-
-    const handleAvailabilityChange = (event: Event) => {
-      const availabilityEvent = event as Event & { value: boolean };
-      setIsBluetoothAvailable(availabilityEvent.value);
-      if (availabilityEvent.value) {
-        addToast('Bluetooth has been turned on.', 'success');
-      } else {
-        addToast('Bluetooth has been turned off.', 'error');
-        if (device?.gatt?.connected) {
-          device.gatt.disconnect();
-        }
-      }
-    };
-
-    navigator.bluetooth.addEventListener('availabilitychanged', handleAvailabilityChange);
-    return () => {
-      navigator.bluetooth.removeEventListener('availabilitychanged', handleAvailabilityChange);
-    };
-  }, [addToast, device]);
 
 
   const tabs = [
@@ -500,7 +459,6 @@ const AquariumControlPage: React.FC = () => {
   }, [addToast, handleDisconnect, handleDeviceNotification]);
 
   const attemptReconnect = useCallback(async () => {
-    if (!isBluetoothAvailable) return;
     const lastDeviceId = localStorage.getItem(LAST_DEVICE_ID_KEY);
     if (!lastDeviceId || !navigator.bluetooth?.getDevices) {
       return;
@@ -525,7 +483,7 @@ const AquariumControlPage: React.FC = () => {
     } finally {
       setIsConnecting(false);
     }
-  }, [addToast, connectToSelectedDevice, isBluetoothAvailable]);
+  }, [addToast, connectToSelectedDevice]);
 
   useEffect(() => {
     attemptReconnect();
@@ -724,6 +682,46 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
     localStorage.setItem(DEVICE_ALIASES_KEY, JSON.stringify(newAliases));
     addToast('Device alias saved!', 'success');
   };
+  
+  const handleFastSetting = (setting: 'daylight' | 'evening' | 'nightlight' | 'off') => {
+    if (!isConnected && !isClientConnectedToBridge) return;
+
+    const sendSequentially = async (commands: string[]) => {
+      for (const command of commands) {
+        await sendCommand(command);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    switch (setting) {
+        case 'daylight':
+            addToast('Setting Daylight mode...', 'info');
+            setIsPowerOn(true);
+            setActivePreset('clear');
+            setBrightness([100]);
+            sendSequentially(['POWER_ON', 'PRESET:clear', 'BRIGHTNESS:100']);
+            break;
+        case 'evening':
+            addToast('Setting Evening mode...', 'info');
+            setIsPowerOn(true);
+            setActivePreset('sunrise');
+            setBrightness([50]);
+            sendSequentially(['POWER_ON', 'PRESET:sunrise', 'BRIGHTNESS:50']);
+            break;
+        case 'nightlight':
+            addToast('Setting Nightlight mode...', 'info');
+            setIsPowerOn(true);
+            setActivePreset('deep');
+            setBrightness([10]);
+            sendSequentially(['POWER_ON', 'PRESET:deep', 'BRIGHTNESS:10']);
+            break;
+        case 'off':
+            addToast('Turning lights off...', 'info');
+            setIsPowerOn(false);
+            sendCommand('POWER_OFF');
+            break;
+    }
+  };
     
   return (
     <div className="min-h-screen bg-[#0D1117] text-gray-300">
@@ -742,7 +740,6 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
           <ConnectionStatus
             isConnected={isConnected || isClientConnectedToBridge}
             isConnecting={isConnecting}
-            isBluetoothAvailable={isBluetoothAvailable}
             onConnect={manualConnect}
             onDisconnect={() => setIsDisconnectConfirmOpen(true)}
             onOpenSettings={() => setIsDeviceSettingsModalOpen(true)}
@@ -769,6 +766,27 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
             <div className="mt-6">
               {activeTab === 'controls' && (
                 <div className="space-y-6">
+                   <Card className="p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <ZapIcon className="w-6 h-6 text-yellow-400"/>
+                        <h3 className="text-xl font-semibold">Fast Settings</h3>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <Button variant="outline" onClick={() => handleFastSetting('daylight')} disabled={!isConnected && !isClientConnectedToBridge}>
+                          <SunIcon className="w-5 h-5 mr-2" /> Daylight
+                        </Button>
+                        <Button variant="outline" onClick={() => handleFastSetting('evening')} disabled={!isConnected && !isClientConnectedToBridge}>
+                          <SunsetIcon className="w-5 h-5 mr-2" /> Evening
+                        </Button>
+                        <Button variant="outline" onClick={() => handleFastSetting('nightlight')} disabled={!isConnected && !isClientConnectedToBridge}>
+                          <MoonIcon className="w-5 h-5 mr-2" /> Nightlight
+                        </Button>
+                        <Button variant="outline" onClick={() => handleFastSetting('off')} disabled={!isConnected && !isClientConnectedToBridge} className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300">
+                          <PowerIcon className="w-5 h-5 mr-2" /> Off
+                        </Button>
+                      </div>
+                    </Card>
+
                    <Card className="p-6">
                      <div className="flex items-center justify-between">
                        <div className="flex items-center gap-3">
