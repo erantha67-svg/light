@@ -1,7 +1,6 @@
 
 import React from 'react';
 import Button from './Button';
-import Card from './Card';
 import { BluetoothIcon, BluetoothOffIcon, Loader2Icon } from './icons';
 
 interface ConnectionStatusProps {
@@ -18,19 +17,19 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
   onDisconnect,
 }) => {
   return (
-    <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
+    <div className="p-4 rounded-xl bg-white/5">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center space-x-3 w-full sm:w-auto">
           {isConnected ? (
-            <BluetoothIcon className="w-6 h-6 text-green-400" />
+            <BluetoothIcon className="w-6 h-6 text-green-400 flex-shrink-0" />
           ) : (
-            <BluetoothOffIcon className="w-6 h-6 text-red-400" />
+            <BluetoothOffIcon className="w-6 h-6 text-red-400 flex-shrink-0" />
           )}
           <div>
             <p className="font-semibold text-white">
               {isConnected ? 'Connected' : 'Disconnected'}
             </p>
-            <p className="text-xs text-cyan-200">
+            <p className="text-xs text-gray-400">
               {isConnecting ? 'Attempting to connect...' : 'Ready to connect'}
             </p>
           </div>
@@ -39,12 +38,13 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
           <Button
             onClick={onDisconnect}
             variant="outline"
-            className="bg-red-500/20 hover:bg-red-500/30 border-red-500/30 text-red-300 hover:text-red-200"
+            className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full sm:w-auto flex-shrink-0"
+            size="sm"
           >
             Disconnect
           </Button>
         ) : (
-          <Button onClick={onConnect} disabled={isConnecting}>
+          <Button onClick={onConnect} disabled={isConnecting} className="w-full sm:w-auto flex-shrink-0">
             {isConnecting ? (
               <>
                 <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
@@ -56,7 +56,7 @@ const ConnectionStatus: React.FC<ConnectionStatusProps> = ({
           </Button>
         )}
       </div>
-    </Card>
+    </div>
   );
 };
 

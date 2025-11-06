@@ -6,12 +6,12 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const Button: React.FC<ButtonProps> = ({ className, variant = 'default', size = 'default', ...props }) => {
-  const baseClasses = 'inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-slate-900 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50';
+  const baseClasses = 'inline-flex items-center justify-center rounded-md text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0D1117] disabled:pointer-events-none disabled:opacity-50';
 
   const variantClasses = {
-    default: 'bg-cyan-500 text-white hover:bg-cyan-500/90',
-    outline: 'border border-slate-600 bg-transparent hover:bg-slate-800 hover:text-slate-100',
-    ghost: 'hover:bg-slate-800 hover:text-slate-100',
+    default: 'bg-gradient-to-r from-purple-500 to-pink-500 text-white font-semibold hover:opacity-90 shadow-lg shadow-purple-500/20',
+    outline: 'border border-[#30363D] bg-transparent hover:bg-white/5',
+    ghost: 'hover:bg-white/10',
   };
 
   const sizeClasses = {

@@ -26,17 +26,17 @@ const Dialog: React.FC<DialogProps> = ({ open, onOpenChange, title, description,
   if (!open) return null;
 
   return ReactDOM.createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
       <div
         className="fixed inset-0"
         onClick={() => onOpenChange(false)}
         aria-hidden="true"
       ></div>
-      <div className="relative z-10 w-full max-w-md m-4 bg-slate-900 border border-cyan-500/50 text-white rounded-lg shadow-lg">
+      <div className="relative z-10 w-full max-w-md m-4 bg-[#161B22] border border-[#30363D] text-white rounded-lg shadow-2xl shadow-black/50">
         <div className="p-6">
           <div className="mb-4">
             <h2 className="text-xl font-semibold text-white">{title}</h2>
-            {description && <p className="text-cyan-200 pt-2">{description}</p>}
+            {description && <p className="text-gray-400 pt-2">{description}</p>}
           </div>
           {children}
         </div>

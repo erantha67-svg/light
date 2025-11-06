@@ -18,7 +18,12 @@ const Slider: React.FC<SliderProps> = ({ value, onValueChange, max, step, disabl
   const progress = (value[0] / max) * 100;
 
   return (
-    <div className={`relative w-full h-2 flex items-center ${disabled ? 'opacity-50' : ''}`}>
+    <div className={`relative w-full h-2 flex items-center ${disabled ? 'opacity-50 cursor-not-allowed' : ''} ${className}`}>
+      <div className="absolute top-0 left-0 h-2 rounded-full bg-[#30363D] w-full" />
+      <div 
+        className="absolute top-0 left-0 h-2 rounded-l-full bg-gradient-to-r from-purple-500 to-pink-500 pointer-events-none"
+        style={{ width: `${progress}%` }}
+      />
       <input
         type="range"
         min={0}
@@ -28,33 +33,23 @@ const Slider: React.FC<SliderProps> = ({ value, onValueChange, max, step, disabl
         onChange={handleValueChange}
         disabled={disabled}
         className={`
-          w-full h-2 bg-transparent appearance-none cursor-pointer
-          [&::-webkit-slider-runnable-track]:rounded-full 
-          [&::-webkit-slider-runnable-track]:h-2
-          [&::-webkit-slider-runnable-track]:bg-slate-700
+          absolute w-full h-2 bg-transparent appearance-none cursor-pointer group
           [&::-webkit-slider-thumb]:appearance-none 
           [&::-webkit-slider-thumb]:h-5 
           [&::-webkit-slider-thumb]:w-5 
           [&::-webkit-slider-thumb]:rounded-full 
-          [&::-webkit-slider-thumb]:bg-cyan-400 
-          [&::-webkit-slider-thumb]:-mt-1.5
-          [&::-webkit-slider-thumb]:border-2
-          [&::-webkit-slider-thumb]:border-slate-900
-          [&::-moz-range-track]:rounded-full 
-          [&::-moz-range-track]:h-2 
-          [&::-moz-range-track]:bg-slate-700
+          [&::-webkit-slider-thumb]:bg-white
+          [&::-webkit-slider-thumb]:shadow-md
+          [&::-webkit-slider-thumb]:transition-transform
+          [&::-webkit-slider-thumb]:group-hover:scale-110
           [&::-moz-range-thumb]:appearance-none 
           [&::-moz-range-thumb]:h-5 
           [&::-moz-range-thumb]:w-5 
           [&::-moz-range-thumb]:rounded-full 
-          [&::-moz-range-thumb]:bg-cyan-400
-          [&::-moz-range-thumb]:border-2
-          [&::-moz-range-thumb]:border-slate-900
+          [&::-moz-range-thumb]:bg-white
+          [&::-moz-range-thumb]:border-none
+          [&::-moz-range-thumb]:shadow-md
         `}
-      />
-       <div 
-        className="absolute top-0 left-0 h-2 rounded-l-full bg-cyan-400 pointer-events-none"
-        style={{ width: `${progress}%` }}
       />
     </div>
   );

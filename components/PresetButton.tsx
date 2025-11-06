@@ -16,20 +16,23 @@ const PresetButton: React.FC<PresetButtonProps> = ({ preset, isActive, isDisable
       onClick={onClick}
       disabled={isDisabled}
       className={`
-        p-4 rounded-xl flex flex-col items-center justify-center space-y-2 
-        transition-all duration-200 transform hover:scale-105
-        ${
-          isActive
-            ? `ring-4 ring-offset-2 ring-offset-slate-800 ring-cyan-400 bg-gradient-to-br ${preset.color}`
-            : 'bg-white/10 hover:bg-white/20 border border-white/20'
-        }
+        relative p-4 rounded-xl flex flex-col items-center justify-center space-y-2 
+        transition-all duration-300 transform hover:-translate-y-1
+        bg-white/5 border border-white/10
+        group
         ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}
+        ${isActive ? 'border-purple-500/50' : ''}
       `}
     >
-      <Icon className={`w-8 h-8 ${isActive ? 'text-white' : 'text-cyan-300'}`} />
-      <span className={`font-semibold text-sm ${isActive ? 'text-white' : 'text-white'}`}>
-        {preset.name}
-      </span>
+      {isActive && (
+        <div className={`absolute -inset-px rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 opacity-50 blur-md group-hover:opacity-75 transition-opacity`}></div>
+      )}
+      <div className="relative z-10 flex flex-col items-center justify-center space-y-2">
+        <Icon className={`w-8 h-8 transition-colors ${isActive ? 'text-white' : 'text-gray-400 group-hover:text-white'}`} />
+        <span className={`font-semibold text-sm transition-colors ${isActive ? 'text-white' : 'text-gray-300 group-hover:text-white'}`}>
+          {preset.name}
+        </span>
+      </div>
     </button>
   );
 };

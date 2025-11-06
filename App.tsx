@@ -240,62 +240,57 @@ const AquariumControlPage: React.FC = () => {
 
   return (
     <>
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-cyan-900 p-4 md:p-8">
-        <div className="max-w-2xl mx-auto space-y-6">
+      <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
+        <div className="max-w-2xl w-full mx-auto space-y-8">
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 shadow-lg shadow-cyan-500/50 mb-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 mb-4">
               <FishIcon className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-4xl font-bold text-white">Aquarium Light</h1>
-            <p className="text-cyan-200">Control your AQ-S lighting system</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">Aquarium Light</h1>
+            <p className="text-gray-400">Control your AQ-S lighting system</p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3">
-            <Button variant="outline" className="w-full bg-white/10 hover:bg-white/20 border-white/20 text-white">
-              <CalendarIcon className="w-4 h-4 mr-2" /> Schedules
-            </Button>
-          </div>
+          <Card className="p-6 space-y-6">
+            <ConnectionStatus isConnected={isConnected} isConnecting={isConnecting} onConnect={startScan} onDisconnect={requestDisconnect} />
 
-          <ConnectionStatus isConnected={isConnected} isConnecting={isConnecting} onConnect={startScan} onDisconnect={requestDisconnect} />
-
-          <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6 space-y-6">
-            <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-white/5 to-white/10 border border-white/20">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-lg bg-white/10"><PowerIcon className="w-6 h-6 text-white" /></div>
-                <div>
-                  <h3 className="text-lg font-semibold text-white">Master Power</h3>
-                  <p className="text-sm text-cyan-200">Turn all lights on/off</p>
-                </div>
+            <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
+              <div className="flex items-center gap-4">
+                <PowerIcon className="w-6 h-6 text-white" />
+                <h3 className="text-lg font-semibold text-white">Master Power</h3>
               </div>
               <Switch checked={isPowerOn} onCheckedChange={handlePowerToggle} disabled={!isConnected} />
             </div>
-            <div className="space-y-4">
+
+            <div className="space-y-4 pt-2">
               <div className="flex items-center justify-between">
                 <label className="text-lg font-semibold text-white">Master Brightness</label>
-                <Badge variant="outline" className="bg-white/10 text-white border-white/30">{brightness[0]}%</Badge>
+                <Badge variant="outline">{brightness[0]}%</Badge>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-2 pt-2">
                 <Slider value={brightness} onValueChange={handleBrightnessChange} max={100} step={1} disabled={!isConnected || !isPowerOn} className="w-full" />
-                <div className="flex justify-between text-xs text-cyan-200">
-                  <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>0%</span>
+                  <span>50%</span>
+                  <span>100%</span>
                 </div>
               </div>
             </div>
-          </Card>
 
-          <Card className="bg-white/10 backdrop-blur-xl border-white/20 p-6">
-            <h3 className="text-xl font-semibold text-white mb-4">Lighting Presets</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {PRESETS.map((preset) => (
-                <PresetButton key={preset.id} preset={preset} isActive={activePreset === preset.id} isDisabled={!isConnected || !isPowerOn} onClick={() => handlePresetSelect(preset)} />
-              ))}
+            <div className="pt-2">
+              <h3 className="text-xl font-semibold text-white mb-4">Lighting Presets</h3>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {PRESETS.map((preset) => (
+                  <PresetButton key={preset.id} preset={preset} isActive={activePreset === preset.id} isDisabled={!isConnected || !isPowerOn} onClick={() => handlePresetSelect(preset)} />
+                ))}
+              </div>
+            </div>
+            
+            <div className="pt-4">
+              <Button variant="outline" className="w-full">
+                <CalendarIcon className="w-4 h-4 mr-2" /> View Schedules
+              </Button>
             </div>
           </Card>
-
-          <div className="text-center text-cyan-300 text-sm space-y-1">
-            <p>Make sure Bluetooth is enabled on your device</p>
-            <p className="text-cyan-400/60">Device: {DEVICE_NAME}</p>
-          </div>
         </div>
       </div>
       <Dialog
