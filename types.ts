@@ -23,6 +23,10 @@ export interface MockBluetoothRemoteGATTService {
 export interface MockBluetoothRemoteGATTCharacteristic {
   writeValue: (data: ArrayBuffer) => Promise<void>;
   writeValueWithoutResponse: (data: ArrayBuffer) => Promise<void>;
+  startNotifications: () => Promise<MockBluetoothRemoteGATTCharacteristic>;
+  addEventListener: (type: 'characteristicvaluechanged', listener: (event: any) => void) => void;
+  removeEventListener: (type: 'characteristicvaluechanged', listener: (event: any) => void) => void;
+  value?: DataView;
 }
 
 // UI Elements

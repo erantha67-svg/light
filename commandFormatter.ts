@@ -21,6 +21,7 @@ const COMMAND_CODES = {
   GRADIENT: 0x08,
   SCHEDULE_CLEAR: 0x10,
   SCHEDULE_ADD: 0x11,
+  REQUEST_STATE: 0x20,
   FACTORY_RESET: 0xFE,
 };
 
@@ -119,6 +120,9 @@ export function formatCommand(command: string): ArrayBuffer {
       commandCode = COMMAND_CODES.FACTORY_RESET;
       // No payload
       break;
+    case 'REQUEST_STATE':
+        commandCode = COMMAND_CODES.REQUEST_STATE;
+        break;
     default:
       console.warn(`Unknown command format: ${command}`);
       return new ArrayBuffer(0);

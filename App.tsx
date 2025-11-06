@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './components/Button';
 import Card from './components/Card';
@@ -22,11 +21,13 @@ import {
   SunsetIcon,
   InfoIcon,
   AlertTriangleIcon,
+  RefreshCwIcon,
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
 import { hslToRgb, rgbToHex, hexToRgb, rgbToHsl, calculateSpectrumColor } from './utils';
 import { formatCommand } from './commandFormatter';
+import { parseDeviceResponse, DeviceState } from './responseParser';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
 const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
@@ -220,12 +221,60 @@ const AquariumControlPage: React.FC = () => {
     }
   }, [schedules]);
 
+  const sendCommand = useCallback(async (command: string) => {
+    if (!characteristic || !isConnected) {
+      addToast('Not connected to device', 'error');
+      return;
+    }
+  
+    const dataBuffer = formatCommand(command);
+  
+    if (dataBuffer.byteLength === 0) {
+      console.warn('Skipping empty command buffer');
+      return;
+    }
+  
+    try {
+      await characteristic.writeValueWithoutResponse(dataBuffer);
+      console.log('Command sent:', command, dataBuffer);
+    } catch (error) {
+      console.error('Command error:', error);
+      addToast('Failed to send command', 'error');
+    }
+  }, [characteristic, isConnected, addToast]);
+
+  const handleDeviceNotification = useCallback((event: any) => {
+    const value = event.target.value;
+    if (!value) return;
+    
+    console.log('Received notification:', value.buffer);
+    const parsedState = parseDeviceResponse(value.buffer);
+
+    if (parsedState) {
+        console.log('Parsed state:', parsedState);
+        if (parsedState.power !== undefined) setIsPowerOn(parsedState.power);
+        if (parsedState.brightness !== undefined) setBrightness([parsedState.brightness]);
+        if (parsedState.activePresetId !== undefined) setActivePreset(parsedState.activePresetId);
+        
+        if(parsedState.mode === 'solid' && parsedState.solidColor) {
+            setSolidColor(parsedState.solidColor);
+            setCustomColorMode('solid');
+        } else if(parsedState.mode === 'spectrum' && parsedState.spectrum) {
+            setSpectrumValues(parsedState.spectrum);
+            setCustomColorMode('spectrum');
+        }
+    }
+  }, []);
+
   const handleDisconnect = useCallback(() => {
+    if(characteristic) {
+      characteristic.removeEventListener('characteristicvaluechanged', handleDeviceNotification);
+    }
     setIsConnected(false);
     setDevice(null);
     setCharacteristic(null);
     addToast('Disconnected from device', 'info');
-  }, [addToast]);
+  }, [addToast, characteristic, handleDeviceNotification]);
   
   const connectToSelectedDevice = useCallback(async (selectedDevice: MockBluetoothDevice) => {
       if (!selectedDevice) return;
@@ -241,14 +290,27 @@ const AquariumControlPage: React.FC = () => {
         const server = await selectedDevice.gatt.connect();
         const service = await server.getPrimaryService(SERVICE_UUID.toLowerCase());
         const char = await service.getCharacteristic(CHARACTERISTIC_UUID.toLowerCase());
+        
+        await char.startNotifications();
+        char.addEventListener('characteristicvaluechanged', handleDeviceNotification);
 
         setDevice(selectedDevice);
         setCharacteristic(char);
         setIsConnected(true);
         localStorage.setItem(LAST_DEVICE_ID_KEY, selectedDevice.id);
         addToast(`Connected to ${selectedDevice.name || 'device'}`, 'success');
-
+        
         selectedDevice.addEventListener('gattserverdisconnected', handleDisconnect);
+
+        addToast('Syncing device state...', 'info');
+        // A short delay before requesting state to ensure notifications are ready
+        setTimeout(() => {
+          const dataBuffer = formatCommand('REQUEST_STATE');
+          if (dataBuffer.byteLength > 0) {
+            char.writeValueWithoutResponse(dataBuffer);
+          }
+        }, 500);
+
       } catch (error) {
         let errorMessage = 'Failed to connect. Please try again.';
         if (error instanceof Error) {
@@ -259,7 +321,7 @@ const AquariumControlPage: React.FC = () => {
         setIsConnecting(false);
         setIsScanModalOpen(false);
       }
-  }, [addToast, handleDisconnect]);
+  }, [addToast, handleDisconnect, handleDeviceNotification]);
 
   const attemptReconnect = useCallback(async () => {
     const lastDeviceId = localStorage.getItem(LAST_DEVICE_ID_KEY);
@@ -383,28 +445,6 @@ const AquariumControlPage: React.FC = () => {
     stopScan();
     connectToSelectedDevice(selectedDevice);
   };
-  
-  const sendCommand = useCallback(async (command: string) => {
-    if (!characteristic || !isConnected) {
-      addToast('Not connected to device', 'error');
-      return;
-    }
-  
-    const dataBuffer = formatCommand(command);
-  
-    if (dataBuffer.byteLength === 0) {
-      console.warn('Skipping empty command buffer');
-      return;
-    }
-  
-    try {
-      await characteristic.writeValueWithoutResponse(dataBuffer);
-      console.log('Command sent:', command, dataBuffer);
-    } catch (error) {
-      console.error('Command error:', error);
-      addToast('Failed to send command', 'error');
-    }
-  }, [characteristic, isConnected, addToast]);
   
   useEffect(() => {
     if (isBridgeModeEnabled && isConnected && bridgeServerUrl) {
@@ -603,6 +643,11 @@ const AquariumControlPage: React.FC = () => {
     addToast('Device has been reset to factory settings.', 'success');
     setIsFactoryResetConfirmOpen(false);
     setIsDeviceSettingsModalOpen(false);
+  }, [sendCommand, addToast]);
+
+  const handleSyncState = useCallback(async () => {
+    await sendCommand('REQUEST_STATE');
+    addToast('Requesting current state from device...', 'info');
   }, [sendCommand, addToast]);
 
   const displayedDeviceName = (device && deviceAliases[device.id]) || device?.name;
@@ -1124,16 +1169,25 @@ const AquariumControlPage: React.FC = () => {
             </div>
             <div className="pt-4 border-t border-white/10">
               <h4 className="text-sm font-medium text-gray-300 mb-3">Device Actions</h4>
-              <Button
-                  variant="outline"
-                  className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                  onClick={() => setIsFactoryResetConfirmOpen(true)}
-              >
-                  <AlertTriangleIcon className="w-4 h-4 mr-2" />
-                  Factory Reset
-              </Button>
+                <div className="grid grid-cols-2 gap-3">
+                  <Button
+                      variant="outline"
+                      onClick={handleSyncState}
+                  >
+                      <RefreshCwIcon className="w-4 h-4 mr-2" />
+                      Sync State
+                  </Button>
+                  <Button
+                      variant="outline"
+                      className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                      onClick={() => setIsFactoryResetConfirmOpen(true)}
+                  >
+                      <AlertTriangleIcon className="w-4 h-4 mr-2" />
+                      Factory Reset
+                  </Button>
+              </div>
               <p className="text-xs text-gray-500 mt-2">
-                  This will erase all custom presets and schedules from the device.
+                  Sync retrieves the current settings from the device. Factory Reset will erase all custom presets and schedules from the device.
               </p>
             </div>
         </div>
