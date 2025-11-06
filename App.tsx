@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './components/Button';
 import Card from './components/Card';
@@ -1059,12 +1060,20 @@ const AquariumControlPage: React.FC = () => {
                 />
             </div>
             <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-300">
-                    Signal Strength
-                </label>
-                <Slider value={[80]} onValueChange={() => {}} max={100} step={1} disabled={true} />
+                <div className="flex justify-between items-center">
+                    <label className="block text-sm font-medium text-gray-300">
+                        Signal Strength
+                    </label>
+                    <Badge variant="outline">-62 dBm (Excellent)</Badge>
+                </div>
+                <div className="w-full h-2 bg-[#30363D] rounded-full overflow-hidden">
+                    <div 
+                        className="h-full rounded-full bg-gradient-to-r from-green-500 to-teal-400" 
+                        style={{ width: '95%' }}
+                    />
+                </div>
                 <p className="text-xs text-gray-500 pt-1">
-                    This setting is not available for this device.
+                    A strong signal ensures a stable connection.
                 </p>
             </div>
             <div className="pt-4 border-t border-white/10">
