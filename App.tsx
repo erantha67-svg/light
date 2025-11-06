@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './components/Button';
 import Card from './components/Card';
@@ -13,12 +14,14 @@ import {
   FishIcon,
   CalendarIcon,
   PowerIcon,
-  Loader2Icon
+  Loader2Icon,
+  CloudIcon,
 } from './components/icons';
 import { PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset } from './types';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
+const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
 
 const AquariumControlPage: React.FC = () => {
   const [device, setDevice] = useState<MockBluetoothDevice | null>(null);
@@ -34,7 +37,27 @@ const AquariumControlPage: React.FC = () => {
   const [isDisconnectConfirmOpen, setIsDisconnectConfirmOpen] = useState(false);
   const { addToast } = useToast();
 
+  const [isBridgeModeEnabled, setIsBridgeModeEnabled] = useState(false);
+  const [bridgeServerUrl, setBridgeServerUrl] = useState('');
+  const [bridgeApiKey, setBridgeApiKey] = useState('');
+  const [bridgeStatus, setBridgeStatus] = useState<'inactive' | 'connecting' | 'active' | 'error'>('inactive');
+
   const scanRef = useRef<any>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+
+  useEffect(() => {
+    try {
+      const savedConfig = localStorage.getItem(BRIDGE_CONFIG_KEY);
+      if (savedConfig) {
+        const { isEnabled, serverUrl, apiKey } = JSON.parse(savedConfig);
+        setIsBridgeModeEnabled(isEnabled ?? false);
+        setBridgeServerUrl(serverUrl ?? '');
+        setBridgeApiKey(apiKey ?? '');
+      }
+    } catch (error) {
+      console.error("Failed to load bridge config from localStorage", error);
+    }
+  }, []);
 
   const handleDisconnect = useCallback(() => {
     setIsConnected(false);
@@ -214,6 +237,65 @@ const AquariumControlPage: React.FC = () => {
       addToast('Failed to send command', 'error');
     }
   }, [characteristic, isConnected, addToast]);
+  
+  useEffect(() => {
+    if (isBridgeModeEnabled && isConnected && bridgeServerUrl) {
+        setBridgeStatus('connecting');
+        addToast('Bridge connecting...', 'info');
+
+        const socket = new WebSocket(bridgeServerUrl);
+        socketRef.current = socket;
+
+        socket.onopen = () => {
+            setBridgeStatus('active');
+            addToast('Bridge connection active', 'success');
+            if (bridgeApiKey) {
+                socket.send(JSON.stringify({ type: 'auth', apiKey: bridgeApiKey, deviceId: device?.id }));
+            }
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.command) {
+                    console.log('Received command from bridge:', data.command);
+                    addToast(`Command received: ${data.command}`, 'info');
+                    sendCommand(data.command);
+                }
+            } catch (error) {
+                console.error('Error parsing bridge message:', error);
+            }
+        };
+
+        socket.onerror = (error) => {
+            console.error('Bridge WebSocket error:', error);
+            setBridgeStatus('error');
+            addToast('Bridge connection error', 'error');
+        };
+
+        socket.onclose = () => {
+            setBridgeStatus('inactive');
+            if (socketRef.current) {
+               addToast('Bridge connection closed', 'info');
+            }
+            socketRef.current = null;
+        };
+
+    } else {
+        if (socketRef.current) {
+            socketRef.current.close();
+            socketRef.current = null;
+            setBridgeStatus('inactive');
+        }
+    }
+
+    return () => {
+        if (socketRef.current) {
+            socketRef.current.close();
+            socketRef.current = null;
+        }
+    };
+  }, [isBridgeModeEnabled, isConnected, bridgeServerUrl, bridgeApiKey, addToast, sendCommand, device?.id]);
 
   const handlePowerToggle = useCallback(async (checked: boolean) => {
     setIsPowerOn(checked);
@@ -241,6 +323,34 @@ const AquariumControlPage: React.FC = () => {
     if (device?.gatt?.connected) {
       localStorage.removeItem(LAST_DEVICE_ID_KEY);
       device.gatt.disconnect();
+    }
+  };
+
+  const handleSaveBridgeConfig = () => {
+    try {
+      const config = {
+        isEnabled: isBridgeModeEnabled,
+        serverUrl: bridgeServerUrl,
+        apiKey: bridgeApiKey,
+      };
+      localStorage.setItem(BRIDGE_CONFIG_KEY, JSON.stringify(config));
+      addToast('Bridge configuration saved!', 'success');
+    } catch (error) {
+      addToast('Failed to save bridge configuration.', 'error');
+    }
+  };
+
+  const handleBridgeToggle = (enabled: boolean) => {
+    setIsBridgeModeEnabled(enabled);
+    try {
+      const config = {
+        isEnabled: enabled,
+        serverUrl: bridgeServerUrl,
+        apiKey: bridgeApiKey,
+      };
+      localStorage.setItem(BRIDGE_CONFIG_KEY, JSON.stringify(config));
+    } catch (error) {
+      console.error("Failed to save bridge enabled state", error);
     }
   };
 
@@ -294,6 +404,67 @@ const AquariumControlPage: React.FC = () => {
             <div className="pt-4">
               <Button variant="outline" className="w-full">
                 <CalendarIcon className="w-4 h-4 mr-2" /> View Schedules
+              </Button>
+            </div>
+          </Card>
+          
+          <Card className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <CloudIcon className="w-6 h-6 text-white" />
+                <h3 className="text-lg font-semibold text-white">Bridge Mode</h3>
+              </div>
+              <Switch
+                checked={isBridgeModeEnabled}
+                onCheckedChange={handleBridgeToggle}
+                disabled={!isConnected || !bridgeServerUrl}
+              />
+            </div>
+            <p className="text-sm text-gray-400 -mt-2">
+              Control your light remotely. This device will act as a bridge, staying connected to the light and listening for commands from the server.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="serverUrl" className="block text-sm font-medium text-gray-300 mb-2">
+                  Server URL
+                </label>
+                <input
+                  id="serverUrl"
+                  type="text"
+                  className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  placeholder="wss://your-bridge-server.com"
+                  value={bridgeServerUrl}
+                  onChange={(e) => setBridgeServerUrl(e.target.value)}
+                />
+              </div>
+              <div>
+                <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">
+                  API Key
+                </label>
+                <input
+                  id="apiKey"
+                  type="password"
+                  className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  placeholder="Enter your secret API key"
+                  value={bridgeApiKey}
+                  onChange={(e) => setBridgeApiKey(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-300">Status:</span>
+                <Badge variant={bridgeStatus === 'active' ? 'default' : 'outline'} className={
+                    bridgeStatus === 'active' ? 'bg-green-600/50 border-green-500/50 text-green-300' :
+                    bridgeStatus === 'error' ? 'bg-red-600/50 border-red-500/50 text-red-300' :
+                    ''
+                }>
+                  {bridgeStatus.charAt(0).toUpperCase() + bridgeStatus.slice(1)}
+                </Badge>
+              </div>
+              <Button onClick={handleSaveBridgeConfig} size="sm">
+                Save Config
               </Button>
             </div>
           </Card>
