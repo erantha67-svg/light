@@ -13,7 +13,7 @@ import {
 
 export const DEVICE_NAME = 'AQ-S';
 export const SERVICE_UUID = '0000fff0-0000-1000-8000-00805f9b34fb';
-export const CHARACTERISTIC_UUID = '0000fff2-0000-1000-8000-00805f9b34fb';
+export const CHARACTERISTIC_UUID = '0000fff1-0000-1000-8000-00805f9b34fb';
 
 export const PRESETS: Preset[] = [
   { id: 'sunrise', name: 'Sunrise/Sunset', icon: SunriseIcon, color: 'from-orange-400 to-pink-400' },

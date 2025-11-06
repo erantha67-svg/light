@@ -27,7 +27,8 @@ const START_BYTE = 0x7E;
 const END_BYTE = 0xEF;
 
 function calculateChecksum(data: number[]): number {
-  return data.reduce((acc, byte) => acc ^ byte, 0);
+  // Use a simple 8-bit sum for the checksum, a common alternative to XOR
+  return data.reduce((acc, byte) => (acc + byte) & 0xFF, 0);
 }
 
 export function formatCommand(command: string): ArrayBuffer {
@@ -123,9 +124,9 @@ export function formatCommand(command: string): ArrayBuffer {
       return new ArrayBuffer(0);
   }
 
-  const packetWithoutChecksum = [START_BYTE, commandCode, ...payload];
-  const checksum = calculateChecksum(packetWithoutChecksum);
-  const finalPacket = new Uint8Array([...packetWithoutChecksum, checksum, END_BYTE]);
+  const commandLength = 1 + payload.length;
+  const checksum = calculateChecksum([commandCode, ...payload]);
+  const finalPacket = new Uint8Array([START_BYTE, commandLength, commandCode, ...payload, checksum, END_BYTE]);
   
   return finalPacket.buffer;
 }

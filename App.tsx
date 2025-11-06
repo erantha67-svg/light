@@ -392,8 +392,8 @@ const AquariumControlPage: React.FC = () => {
     }
   
     try {
-      // Use writeValue (acknowledged write) for more reliable communication
-      await characteristic.writeValue(dataBuffer);
+      // Use writeValueWithoutResponse (fire and forget) for faster commands on some devices
+      await characteristic.writeValueWithoutResponse(dataBuffer);
       console.log('Command sent:', command, dataBuffer);
     } catch (error) {
       console.error('Command error:', error);
