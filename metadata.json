@@ -1,0 +1,5 @@
+{
+  "name": "Aquarium Light Controller",
+  "description": "A web application to control an AQ-S aquarium lighting system via Bluetooth, with a bridge mode for remote access.",
+  "requestFramePermissions": []
+}
