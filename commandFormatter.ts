@@ -1,4 +1,3 @@
-
 import { hexToRgb } from './utils';
 import { Schedule } from './types';
 
@@ -14,7 +13,10 @@ const PRESET_MAP: { [key: string]: number } = {
 const COMMAND_CODES = {
   POWER: 0x01,
   BRIGHTNESS: 0x02,
-  SET_MODE: 0x03,
+  PRESET: 0x03,
+  SOLID_COLOR: 0x04,
+  GRADIENT: 0x05,
+  SPECTRUM: 0x06,
   SCHEDULE_CLEAR: 0x10,
   SCHEDULE_ADD: 0x11,
   REQUEST_STATE: 0x20,
@@ -22,18 +24,10 @@ const COMMAND_CODES = {
   FACTORY_RESET: 0xFE,
 };
 
-const MODE_SUB_CODES = {
-  PRESET: 0x01,
-  SOLID_COLOR: 0x02,
-  SPECTRUM: 0x03,
-  GRADIENT: 0x04,
-};
-
 const START_BYTE = 0x7E;
 const END_BYTE = 0xEF;
 
 function calculateChecksum(data: number[]): number {
-  // Use a simple XOR checksum, which is very common for these devices.
   return data.reduce((acc, byte) => acc ^ byte, 0);
 }
 
@@ -59,29 +53,29 @@ export function formatCommand(command: string): ArrayBuffer {
       payload = [parseInt(params[0], 10)];
       break;
     case 'PRESET':
-      commandCode = COMMAND_CODES.SET_MODE;
+      commandCode = COMMAND_CODES.PRESET;
       const presetId = PRESET_MAP[params[0].toLowerCase()] || 0x00;
-      payload = [MODE_SUB_CODES.PRESET, presetId];
+      payload = [presetId];
       break;
     case 'COLOR_HEX':
-      commandCode = COMMAND_CODES.SET_MODE;
+      commandCode = COMMAND_CODES.SOLID_COLOR;
       const rgbSolid = hexToRgb(`#${params[0]}`);
       if (rgbSolid) {
-        payload = [MODE_SUB_CODES.SOLID_COLOR, rgbSolid.r, rgbSolid.g, rgbSolid.b];
+        payload = [rgbSolid.r, rgbSolid.g, rgbSolid.b];
       }
       break;
     case 'GRADIENT_HEX':
-      commandCode = COMMAND_CODES.SET_MODE;
+      commandCode = COMMAND_CODES.GRADIENT;
       const rgbStart = hexToRgb(`#${params[0]}`);
       const rgbEnd = hexToRgb(`#${params[1]}`);
       if (rgbStart && rgbEnd) {
-        payload = [MODE_SUB_CODES.GRADIENT, rgbStart.r, rgbStart.g, rgbStart.b, rgbEnd.r, rgbEnd.g, rgbEnd.b];
+        payload = [rgbStart.r, rgbStart.g, rgbStart.b, rgbEnd.r, rgbEnd.g, rgbEnd.b];
       }
       break;
     case 'SPECTRUM':
-      commandCode = COMMAND_CODES.SET_MODE;
+      commandCode = COMMAND_CODES.SPECTRUM;
       const spectrumValues = params.map(p => parseInt(p, 10));
-      payload = [MODE_SUB_CODES.SPECTRUM, ...spectrumValues];
+      payload = [...spectrumValues];
       break;
     case 'SCHEDULE_CLEAR':
       commandCode = COMMAND_CODES.SCHEDULE_CLEAR;
@@ -116,11 +110,10 @@ export function formatCommand(command: string): ArrayBuffer {
       break;
     case 'FACTORY_RESET':
       commandCode = COMMAND_CODES.FACTORY_RESET;
-      // No payload
       break;
     case 'REQUEST_STATE':
-        commandCode = COMMAND_CODES.REQUEST_STATE;
-        break;
+      commandCode = COMMAND_CODES.REQUEST_STATE;
+      break;
     case 'SYNC_TIME':
       commandCode = COMMAND_CODES.SYNC_TIME;
       const now = new Date();

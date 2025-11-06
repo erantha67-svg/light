@@ -32,7 +32,7 @@ import {
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID_NOTIFY, CHARACTERISTIC_UUID_WRITE } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
-import { hslToRgb, rgbToHex, hexToRgb, rgbToHsl, calculateSpectrumColor } from './utils';
+import { hslToRgb, rgbToHex, hexToRgb, rgbToHsl, calculateSpectrumColor, debounce } from './utils';
 import { formatCommand } from './commandFormatter';
 import { parseDeviceResponse, DeviceState } from './responseParser';
 
@@ -70,7 +70,6 @@ const ColorPicker: React.FC<{ color: string; onChange: (color: string) => void; 
     const { width, left } = hueRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(width, e.clientX - left));
     const newH = x / width;
-    // Fix for: Block-scoped variable 'newHsl' used before its declaration.
     const newHsl: [number, number, number] = [newH, hsl[1], hsl[2]];
     setHsl(newHsl);
     const [r, g, b] = hslToRgb(newHsl[0], newHsl[1], newHsl[2]);
@@ -352,12 +351,18 @@ const AquariumControlPage: React.FC = () => {
   
     try {
       await characteristic.writeValue(dataBuffer);
-      console.log('Command sent via Bluetooth (with response):', command, dataBuffer);
+      console.log('Command sent via Bluetooth:', command);
     } catch (error) {
       console.error('Bluetooth command error:', error);
       addToast('Failed to send command', 'error');
     }
   }, [characteristic, isConnected, isClientConnectedToBridge, addToast]);
+
+  const debouncedSendCommand = useRef(
+    debounce((command: string) => {
+        sendCommand(command);
+    }, 250)
+  ).current;
 
   const handleDeviceNotification = useCallback((event: any) => {
     const value = event.target.value;
@@ -738,7 +743,7 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
                          value={brightness} 
                          onValueChange={(val) => {
                             setBrightness(val);
-                            sendCommand(`BRIGHTNESS:${val[0]}`);
+                            debouncedSendCommand(`BRIGHTNESS:${val[0]}`);
                          }} 
                          max={100} 
                          step={1} 
@@ -830,7 +835,7 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
                         </div>
                        <ColorPicker color={solidColor} onChange={(c) => {
                             setSolidColor(c);
-                            sendCommand(`COLOR_HEX:${c.substring(1)}`);
+                            debouncedSendCommand(`COLOR_HEX:${c.substring(1)}`);
                        }} disabled={isControlDisabled}/>
                        <div className="mt-4 flex items-center gap-2">
                          <input
@@ -860,14 +865,20 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
                                 <label className="text-sm font-medium">Start Color</label>
                                 <div className="w-6 h-6 rounded-full border border-white/20" style={{backgroundColor: gradientStart}}></div>
                             </div>
-                            <ColorPicker color={gradientStart} onChange={setGradientStart} disabled={isControlDisabled}/>
+                            <ColorPicker color={gradientStart} onChange={(c) => {
+                                setGradientStart(c);
+                                debouncedSendCommand(`GRADIENT_HEX:${c.substring(1)}:${gradientEnd.substring(1)}`);
+                            }} disabled={isControlDisabled}/>
                           </div>
                           <div>
                             <div className="flex justify-between items-center mb-2">
                                 <label className="text-sm font-medium">End Color</label>
                                 <div className="w-6 h-6 rounded-full border border-white/20" style={{backgroundColor: gradientEnd}}></div>
                             </div>
-                            <ColorPicker color={gradientEnd} onChange={setGradientEnd} disabled={isControlDisabled}/>
+                            <ColorPicker color={gradientEnd} onChange={(c) => {
+                                setGradientEnd(c);
+                                debouncedSendCommand(`GRADIENT_HEX:${gradientStart.substring(1)}:${c.substring(1)}`);
+                            }} disabled={isControlDisabled}/>
                           </div>
                         </div>
                         <div className="mt-6">
@@ -918,7 +929,7 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
                                   const newValues = { ...spectrumValues, [channel]: val[0] };
                                   setSpectrumValues(newValues);
                                   const {red, green, blue, white, uv} = newValues;
-                                  sendCommand(`SPECTRUM:${red}:${green}:${blue}:${white}:${uv}`);
+                                  debouncedSendCommand(`SPECTRUM:${red}:${green}:${blue}:${white}:${uv}`);
                                 }}
                                 max={100}
                                 step={1}

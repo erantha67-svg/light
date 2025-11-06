@@ -67,3 +67,16 @@ export function calculateSpectrumColor(values: { red: number, green: number, blu
 
   return rgbToHex(Math.min(255, finalR), Math.min(255, finalG), Math.min(255, finalB));
 }
+
+// Debounce function to limit the rate of command sending
+export function debounce<T extends (...args: any[]) => void>(func: T, wait: number): (...args: Parameters<T>) => void {
+  let timeout: number | undefined;
+  return function executedFunction(...args: Parameters<T>) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = window.setTimeout(later, wait);
+  };
+}
