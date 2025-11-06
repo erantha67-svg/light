@@ -40,14 +40,21 @@ export interface ToastMessage {
 }
 
 // Fix for: Property 'bluetooth' does not exist on type 'Navigator'.
+// Corrected Bluetooth filter options to allow for filtering by name and other properties.
+interface BluetoothDeviceFilter {
+  services?: string[];
+  name?: string;
+  namePrefix?: string;
+}
+
 interface RequestDeviceOptions {
-  filters?: { services?: string[] }[];
+  filters?: BluetoothDeviceFilter[];
   optionalServices?: string[];
   acceptAllDevices?: boolean;
 }
 
 interface BluetoothLEScanOptions {
-  filters?: { services?: string[] }[];
+  filters?: BluetoothDeviceFilter[];
   acceptAllAdvertisements?: boolean;
 }
 

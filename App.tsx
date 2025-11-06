@@ -144,8 +144,11 @@ const AquariumControlPage: React.FC = () => {
     setScannedDevices([]);
 
     try {
+      // FIX: Combined filters into a single object for a more specific scan.
       const scan = await navigator.bluetooth.requestLEScan({
-        filters: [{ services: [SERVICE_UUID.toLowerCase()] }],
+        filters: [
+          { services: [SERVICE_UUID.toLowerCase()], name: DEVICE_NAME }
+        ],
       });
       scanRef.current = scan;
       navigator.bluetooth.addEventListener('advertisementreceived', handleAdvertisement);
@@ -171,8 +174,11 @@ const AquariumControlPage: React.FC = () => {
   const manualConnect = async () => {
     try {
       const DFU_SERVICE_UUID = '4169726f-6861-4446-5553-657276696365';
+      // FIX: Combined filters into a single object for a more specific device request.
       const bluetoothDevice = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [SERVICE_UUID.toLowerCase()] }],
+        filters: [
+          { services: [SERVICE_UUID.toLowerCase()], name: DEVICE_NAME }
+        ],
         optionalServices: [SERVICE_UUID.toLowerCase(), DFU_SERVICE_UUID]
       });
       await connectToSelectedDevice(bluetoothDevice);
