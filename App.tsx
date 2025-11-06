@@ -157,6 +157,9 @@ const AquariumControlPage: React.FC = () => {
   const [isFactoryResetConfirmOpen, setIsFactoryResetConfirmOpen] = useState(false);
   const scanRef = useRef<any>(null);
   
+  // Bluetooth availability state
+  const [isBluetoothAvailable, setIsBluetoothAvailable] = useState(true);
+  
   // Bridge state (WebRTC)
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -192,6 +195,48 @@ const AquariumControlPage: React.FC = () => {
   useEffect(() => {
     setPlaceholderPrompt(placeholderPrompts[Math.floor(Math.random() * placeholderPrompts.length)]);
   }, []);
+
+  useEffect(() => {
+    if (!('bluetooth' in navigator)) {
+      setIsBluetoothAvailable(false);
+      addToast('Web Bluetooth is not supported on this browser.', 'error');
+      return;
+    }
+
+    const checkAvailability = async () => {
+      if (navigator.bluetooth.getAvailability) {
+        try {
+          const available = await navigator.bluetooth.getAvailability();
+          setIsBluetoothAvailable(available);
+          if (!available) {
+            addToast('Please enable Bluetooth to connect.', 'info');
+          }
+        } catch (err) {
+          console.warn('Could not check Bluetooth availability.', err);
+          setIsBluetoothAvailable(true); // Assume available if API fails to avoid blocking UI
+        }
+      }
+    };
+    checkAvailability();
+
+    const handleAvailabilityChange = (event: Event) => {
+      const availabilityEvent = event as Event & { value: boolean };
+      setIsBluetoothAvailable(availabilityEvent.value);
+      if (availabilityEvent.value) {
+        addToast('Bluetooth has been turned on.', 'success');
+      } else {
+        addToast('Bluetooth has been turned off.', 'error');
+        if (device?.gatt?.connected) {
+          device.gatt.disconnect();
+        }
+      }
+    };
+
+    navigator.bluetooth.addEventListener('availabilitychanged', handleAvailabilityChange);
+    return () => {
+      navigator.bluetooth.removeEventListener('availabilitychanged', handleAvailabilityChange);
+    };
+  }, [addToast, device]);
 
 
   const tabs = [
@@ -455,6 +500,7 @@ const AquariumControlPage: React.FC = () => {
   }, [addToast, handleDisconnect, handleDeviceNotification]);
 
   const attemptReconnect = useCallback(async () => {
+    if (!isBluetoothAvailable) return;
     const lastDeviceId = localStorage.getItem(LAST_DEVICE_ID_KEY);
     if (!lastDeviceId || !navigator.bluetooth?.getDevices) {
       return;
@@ -479,7 +525,7 @@ const AquariumControlPage: React.FC = () => {
     } finally {
       setIsConnecting(false);
     }
-  }, [addToast, connectToSelectedDevice]);
+  }, [addToast, connectToSelectedDevice, isBluetoothAvailable]);
 
   useEffect(() => {
     attemptReconnect();
@@ -696,6 +742,7 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
           <ConnectionStatus
             isConnected={isConnected || isClientConnectedToBridge}
             isConnecting={isConnecting}
+            isBluetoothAvailable={isBluetoothAvailable}
             onConnect={manualConnect}
             onDisconnect={() => setIsDisconnectConfirmOpen(true)}
             onOpenSettings={() => setIsDeviceSettingsModalOpen(true)}
