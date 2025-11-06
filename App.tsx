@@ -201,7 +201,7 @@ const AquariumControlPage: React.FC = () => {
     try {
       const encoder = new TextEncoder();
       const data = encoder.encode(command);
-      await characteristic.writeValue(data);
+      await characteristic.writeValueWithoutResponse(data);
       console.log('Command sent:', command);
     } catch (error) {
       console.error('Command error:', error);

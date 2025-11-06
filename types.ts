@@ -22,6 +22,7 @@ export interface MockBluetoothRemoteGATTService {
 
 export interface MockBluetoothRemoteGATTCharacteristic {
   writeValue: (data: ArrayBuffer) => Promise<void>;
+  writeValueWithoutResponse: (data: ArrayBuffer) => Promise<void>;
 }
 
 // UI Elements
