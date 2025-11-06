@@ -33,6 +33,20 @@ export interface Preset {
   color: string;
 }
 
+export interface SpectrumPreset {
+  id: string;
+  name: string;
+  icon: React.FC<SVGProps<SVGSVGElement>>;
+  values: {
+    red: number;
+    green: number;
+    blue: number;
+    white: number;
+    uv: number;
+  };
+}
+
+
 export interface ToastMessage {
   id: number;
   message: string;

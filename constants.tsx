@@ -1,5 +1,6 @@
 
-import { Preset } from './types';
+
+import { Preset, SpectrumPreset } from './types';
 import {
   SunriseIcon,
   SunIcon,
@@ -7,6 +8,7 @@ import {
   MoonIcon,
   SparklesIcon,
   FishIcon,
+  LeafIcon,
 } from './components/icons';
 
 export const DEVICE_NAME = 'AQ-S';
@@ -20,4 +22,25 @@ export const PRESETS: Preset[] = [
   { id: 'deep', name: 'Deep Ocean', icon: MoonIcon, color: 'from-blue-600 to-indigo-800' },
   { id: 'coral', name: 'Coral Reef', icon: SparklesIcon, color: 'from-pink-400 to-purple-400' },
   { id: 'natural', name: 'Natural Day', icon: FishIcon, color: 'from-yellow-200 to-blue-300' },
+];
+
+export const SPECTRUM_PRESETS: SpectrumPreset[] = [
+  {
+    id: 'reef',
+    name: 'Reef Growth',
+    icon: SparklesIcon,
+    values: { red: 30, green: 50, blue: 100, white: 80, uv: 90 },
+  },
+  {
+    id: 'planted',
+    name: 'Planted Tank',
+    icon: LeafIcon,
+    values: { red: 95, green: 70, blue: 85, white: 90, uv: 10 },
+  },
+  {
+    id: 'fish',
+    name: 'Vivid Fish',
+    icon: FishIcon,
+    values: { red: 80, green: 80, blue: 95, white: 100, uv: 5 },
+  },
 ];

@@ -9,6 +9,7 @@ import PresetButton from './components/PresetButton';
 import { ToastProvider, useToast } from './components/Toast';
 import Dialog from './components/Dialog';
 import ScheduleDialog from './components/ScheduleDialog';
+import SpectrumPresetButton from './components/SpectrumPresetButton';
 import {
   FishIcon,
   CalendarIcon,
@@ -19,8 +20,8 @@ import {
   SunriseIcon,
   SunsetIcon,
 } from './components/icons';
-import { PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
-import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule } from './types';
+import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
+import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
 const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
@@ -542,6 +543,11 @@ const AquariumControlPage: React.FC = () => {
     setSpectrumValues(prev => ({ ...prev, [channel]: value }));
   }, []);
 
+  const handleSelectSpectrumPreset = useCallback((preset: SpectrumPreset) => {
+    setSpectrumValues(preset.values);
+    addToast(`${preset.name} spectrum preset selected.`, 'info');
+  }, [addToast]);
+
   const handleApplyCustomColor = useCallback(async () => {
     let command = '';
     let toastMessage = 'Custom lighting applied';
@@ -652,6 +658,16 @@ const AquariumControlPage: React.FC = () => {
   }, [schedules, sendCommand, addToast]);
 
   const displayedDeviceName = (device && deviceAliases[device.id]) || device?.name;
+
+  const isSpectrumPresetActive = (preset: SpectrumPreset) => {
+    return (
+      preset.values.red === spectrumValues.red &&
+      preset.values.green === spectrumValues.green &&
+      preset.values.blue === spectrumValues.blue &&
+      preset.values.white === spectrumValues.white &&
+      preset.values.uv === spectrumValues.uv
+    );
+  };
 
   const SpectrumSlider: React.FC<{
     channel: string;
@@ -898,11 +914,27 @@ const AquariumControlPage: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-6">
-                        <SpectrumSlider channel="red" value={spectrumValues.red} onChange={handleSpectrumChange} trackClassName="bg-red-500" disabled={!isConnected || !isPowerOn} />
-                        <SpectrumSlider channel="green" value={spectrumValues.green} onChange={handleSpectrumChange} trackClassName="bg-green-500" disabled={!isConnected || !isPowerOn} />
-                        <SpectrumSlider channel="blue" value={spectrumValues.blue} onChange={handleSpectrumChange} trackClassName="bg-blue-500" disabled={!isConnected || !isPowerOn} />
-                        <SpectrumSlider channel="white" value={spectrumValues.white} onChange={handleSpectrumChange} trackClassName="bg-gray-200" disabled={!isConnected || !isPowerOn} />
-                        <SpectrumSlider channel="uv" value={spectrumValues.uv} onChange={handleSpectrumChange} trackClassName="bg-violet-500" disabled={!isConnected || !isPowerOn} />
+                        <div className="space-y-4 pt-2 border-t border-white/10">
+                          <h4 className="text-md font-semibold text-white">Spectrum Presets</h4>
+                          <div className="grid grid-cols-3 gap-3">
+                            {SPECTRUM_PRESETS.map(preset => (
+                              <SpectrumPresetButton
+                                key={preset.id}
+                                preset={preset}
+                                isActive={isSpectrumPresetActive(preset)}
+                                onClick={() => handleSelectSpectrumPreset(preset)}
+                                isDisabled={!isConnected || !isPowerOn}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="space-y-6 pt-6 border-t border-white/10">
+                          <SpectrumSlider channel="red" value={spectrumValues.red} onChange={handleSpectrumChange} trackClassName="bg-red-500" disabled={!isConnected || !isPowerOn} />
+                          <SpectrumSlider channel="green" value={spectrumValues.green} onChange={handleSpectrumChange} trackClassName="bg-green-500" disabled={!isConnected || !isPowerOn} />
+                          <SpectrumSlider channel="blue" value={spectrumValues.blue} onChange={handleSpectrumChange} trackClassName="bg-blue-500" disabled={!isConnected || !isPowerOn} />
+                          <SpectrumSlider channel="white" value={spectrumValues.white} onChange={handleSpectrumChange} trackClassName="bg-gray-200" disabled={!isConnected || !isPowerOn} />
+                          <SpectrumSlider channel="uv" value={spectrumValues.uv} onChange={handleSpectrumChange} trackClassName="bg-violet-500" disabled={!isConnected || !isPowerOn} />
+                        </div>
                       </div>
                     )}
                   </div>
