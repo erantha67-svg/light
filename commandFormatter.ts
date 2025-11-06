@@ -21,6 +21,7 @@ const COMMAND_CODES = {
   GRADIENT: 0x08,
   SCHEDULE_CLEAR: 0x10,
   SCHEDULE_ADD: 0x11,
+  FACTORY_RESET: 0xFE,
 };
 
 const START_BYTE = 0x7E;
@@ -113,6 +114,10 @@ export function formatCommand(command: string): ArrayBuffer {
       } else if (actionType === 'power_off') {
         payload.push(3);
       }
+      break;
+    case 'FACTORY_RESET':
+      commandCode = COMMAND_CODES.FACTORY_RESET;
+      // No payload
       break;
     default:
       console.warn(`Unknown command format: ${command}`);

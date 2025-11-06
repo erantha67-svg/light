@@ -20,6 +20,8 @@ import {
   PaintbrushIcon,
   SunriseIcon,
   SunsetIcon,
+  InfoIcon,
+  AlertTriangleIcon,
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
@@ -153,6 +155,7 @@ const AquariumControlPage: React.FC = () => {
   const [isDeviceSettingsModalOpen, setIsDeviceSettingsModalOpen] = useState(false);
   const [deviceAliases, setDeviceAliases] = useState<{ [key: string]: string }>({});
   const [currentDeviceAlias, setCurrentDeviceAlias] = useState('');
+  const [isFactoryResetConfirmOpen, setIsFactoryResetConfirmOpen] = useState(false);
 
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
@@ -594,6 +597,13 @@ const AquariumControlPage: React.FC = () => {
     addToast('Schedules synced successfully!', 'success');
     setIsScheduleModalOpen(false);
   }, [schedules, sendCommand, addToast]);
+
+  const handleFactoryReset = useCallback(async () => {
+    await sendCommand('FACTORY_RESET');
+    addToast('Device has been reset to factory settings.', 'success');
+    setIsFactoryResetConfirmOpen(false);
+    setIsDeviceSettingsModalOpen(false);
+  }, [sendCommand, addToast]);
 
   const displayedDeviceName = (device && deviceAliases[device.id]) || device?.name;
 
@@ -1076,6 +1086,15 @@ const AquariumControlPage: React.FC = () => {
                     A strong signal ensures a stable connection.
                 </p>
             </div>
+            <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
+                        <InfoIcon className="w-4 h-4" />
+                        Firmware Version
+                    </label>
+                    <Badge variant="outline">v1.2.4</Badge>
+                </div>
+            </div>
             <div className="pt-4 border-t border-white/10">
               <details>
                 <summary className="cursor-pointer text-sm font-medium text-gray-300 hover:text-white">
@@ -1103,6 +1122,20 @@ const AquariumControlPage: React.FC = () => {
                 </div>
               </details>
             </div>
+            <div className="pt-4 border-t border-white/10">
+              <h4 className="text-sm font-medium text-gray-300 mb-3">Device Actions</h4>
+              <Button
+                  variant="outline"
+                  className="w-full border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  onClick={() => setIsFactoryResetConfirmOpen(true)}
+              >
+                  <AlertTriangleIcon className="w-4 h-4 mr-2" />
+                  Factory Reset
+              </Button>
+              <p className="text-xs text-gray-500 mt-2">
+                  This will erase all custom presets and schedules from the device.
+              </p>
+            </div>
         </div>
         <div className="mt-8 flex justify-end gap-3">
             <Button
@@ -1115,6 +1148,39 @@ const AquariumControlPage: React.FC = () => {
                 onClick={handleSaveDeviceSettings}
             >
                 Save Changes
+            </Button>
+        </div>
+      </Dialog>
+       <Dialog
+        open={isFactoryResetConfirmOpen}
+        onOpenChange={setIsFactoryResetConfirmOpen}
+        title={
+          <div className="flex items-center gap-2 text-red-400">
+            <AlertTriangleIcon className="w-6 h-6" />
+            Are you absolutely sure?
+          </div>
+        }
+      >
+        <div className="mt-4 space-y-4">
+          <p className="text-gray-400">
+            This action is irreversible. Performing a factory reset will delete all your saved schedules and custom settings from the device, restoring it to its original state.
+          </p>
+          <p className="text-gray-300 font-semibold">
+            Your schedules saved in this app will not be deleted, but you will need to sync them again.
+          </p>
+        </div>
+        <div className="mt-8 flex justify-end gap-3">
+           <Button
+              variant="outline"
+              onClick={() => setIsFactoryResetConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={handleFactoryReset}
+            >
+              Confirm Reset
             </Button>
         </div>
       </Dialog>
