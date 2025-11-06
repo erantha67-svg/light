@@ -30,8 +30,8 @@ const START_BYTE = 0x7E;
 const END_BYTE = 0xEF;
 
 function calculateChecksum(data: number[]): number {
-  // Use a simple 8-bit sum for the checksum, a common alternative to XOR
-  return data.reduce((acc, byte) => (acc + byte) & 0xFF, 0);
+  // Use a simple XOR checksum, which is very common for these devices.
+  return data.reduce((acc, byte) => acc ^ byte, 0);
 }
 
 export function formatCommand(command: string): ArrayBuffer {

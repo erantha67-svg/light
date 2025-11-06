@@ -35,7 +35,7 @@ function verifyChecksum(data: Uint8Array): boolean {
     if (data.length < 2) return false;
     const payload = data.slice(0, -1);
     const checksum = data[data.length - 1];
-    const calculatedChecksum = payload.reduce((acc, byte) => (acc + byte) & 0xFF, 0);
+    const calculatedChecksum = payload.reduce((acc, byte) => acc ^ byte, 0);
     return checksum === calculatedChecksum;
 }
 
