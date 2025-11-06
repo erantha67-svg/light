@@ -314,7 +314,8 @@ const AquariumControlPage: React.FC = () => {
       const DFU_SERVICE_UUID = '4169726f-6861-4446-5553-657276696365';
       const bluetoothDevice = await navigator.bluetooth.requestDevice({
         filters: [
-          { services: [SERVICE_UUID.toLowerCase()], name: DEVICE_NAME }
+          { services: [SERVICE_UUID.toLowerCase()] },
+          { name: DEVICE_NAME }
         ],
         optionalServices: [SERVICE_UUID.toLowerCase(), DFU_SERVICE_UUID]
       });
@@ -354,7 +355,8 @@ const AquariumControlPage: React.FC = () => {
     try {
       const scan = await navigator.bluetooth.requestLEScan({
         filters: [
-          { services: [SERVICE_UUID.toLowerCase()] }
+          { services: [SERVICE_UUID.toLowerCase()] },
+          { name: DEVICE_NAME }
         ],
       });
       scanRef.current = scan;
@@ -392,7 +394,6 @@ const AquariumControlPage: React.FC = () => {
     }
   
     try {
-      // Use writeValueWithoutResponse (fire and forget) for faster commands on some devices
       await characteristic.writeValueWithoutResponse(dataBuffer);
       console.log('Command sent:', command, dataBuffer);
     } catch (error) {
