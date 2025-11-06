@@ -1067,6 +1067,33 @@ const AquariumControlPage: React.FC = () => {
                     This setting is not available for this device.
                 </p>
             </div>
+            <div className="pt-4 border-t border-white/10">
+              <details>
+                <summary className="cursor-pointer text-sm font-medium text-gray-300 hover:text-white">
+                  Compliance Information
+                </summary>
+                <div className="mt-4 text-xs text-gray-400 space-y-3 max-h-48 overflow-y-auto pr-2">
+                  <p className="font-semibold text-gray-300">FCC STATEMENT:</p>
+                  <p>This device complies with Part 15 of the FCC Rules. Operation is subject to the following two conditions:</p>
+                  <ol className="list-decimal list-inside space-y-1 pl-2">
+                    <li>This device may not cause harmful interference, and</li>
+                    <li>This device must accept any interference received, including interference that may cause undesired operation.</li>
+                  </ol>
+                  <p className="font-semibold text-gray-300 pt-2">Warning:</p>
+                  <p>Changes or modifications not expressly approved by the party responsible for compliance could void the user’s authority to operate the equipment.</p>
+                  <p className="font-semibold text-gray-300 pt-2">NOTE:</p>
+                  <p>This equipment has been tested and found to comply with the limits for a Class B digital device, pursuant to Part 15 of the FCC Rules. These limits are designed to provide reasonable protection against harmful interference in a residential installation. This equipment generates, uses, and can radiate radio frequency energy and, if not installed and used in accordance with the instructions, may cause harmful interference to radio communications. However, there is no guarantee that interference will not occur in a particular installation. If this equipment does cause harmful interference to radio or television reception, which can be determined by turning the equipment off and on, the user is encouraged to try to correct the interference by one or more of the following measures:</p>
+                  <ul className="list-disc list-inside space-y-1 pl-2">
+                    <li>Reorient or relocate the receiving antenna.</li>
+                    <li>Increase the separation between the equipment and receiver.</li>
+                    <li>Connect the equipment into an outlet on a circuit different from that to which the receiver is connected.</li>
+                    <li>Consult the dealer or an experienced radio/TV technician for help.</li>
+                  </ul>
+                  <p className="font-semibold text-gray-300 pt-2">FCC Radiation Exposure Statement:</p>
+                  <p>This equipment complies with FCC radiation exposure limits set forth for an uncontrolled environment. This equipment should be installed and operated with a minimum distance 20cm between the radiator & your body.</p>
+                </div>
+              </details>
+            </div>
         </div>
         <div className="mt-8 flex justify-end gap-3">
             <Button
