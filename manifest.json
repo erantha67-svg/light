@@ -1,0 +1,21 @@
+{
+  "name": "Aquarium Light Controller",
+  "short_name": "Aquarium Ctrl",
+  "description": "A web application to control an AQ-S aquarium lighting system via Bluetooth.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0D1117",
+  "theme_color": "#161B22",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
