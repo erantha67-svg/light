@@ -22,81 +22,13 @@ import {
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
+import { hslToRgb, rgbToHex, hexToRgb, rgbToHsl, calculateSpectrumColor } from './utils';
+import { formatCommand } from './commandFormatter';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
 const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
 const DEVICE_ALIASES_KEY = 'aquariumDeviceAliases';
 const SCHEDULES_KEY = 'aquariumSchedules';
-
-// Color conversion utilities
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  let r, g, b;
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const hue2rgb = (p: number, q: number, t: number) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
-
-function rgbToHex(r: number, g: number, b: number): string {
-  return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).padStart(6, '0');
-}
-
-function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  } : null;
-}
-
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s, l = (max + min) / 2;
-  if (max === min) {
-    h = s = 0;
-  } else {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      case b: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return [h, s, l];
-}
-
-function calculateSpectrumColor(values: { red: number, green: number, blue: number, white: number, uv: number }): string {
-  const r_norm = values.red / 100;
-  const g_norm = values.green / 100;
-  const b_norm = values.blue / 100;
-  const w_norm = values.white / 100;
-  
-  // Mix RGB with White. As white increases, it washes out the color towards white.
-  const finalR = Math.round((r_norm * (1 - w_norm) + w_norm) * 255);
-  const finalG = Math.round((g_norm * (1 - w_norm) + w_norm) * 255);
-  const finalB = Math.round((b_norm * (1 - w_norm) + w_norm) * 255);
-
-  return rgbToHex(Math.min(255, finalR), Math.min(255, finalG), Math.min(255, finalB));
-}
-
 
 const ColorPicker: React.FC<{ color: string; onChange: (color: string) => void; disabled?: boolean; }> = ({ color, onChange, disabled }) => {
   const [hsl, setHsl] = useState([0, 1, 0.5]);
@@ -451,12 +383,18 @@ const AquariumControlPage: React.FC = () => {
       addToast('Not connected to device', 'error');
       return;
     }
-
+  
+    const dataBuffer = formatCommand(command);
+  
+    if (dataBuffer.byteLength === 0) {
+      console.warn('Skipping empty command buffer');
+      return;
+    }
+  
     try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(command);
-      await characteristic.writeValueWithoutResponse(data);
-      console.log('Command sent:', command);
+      // Use writeValue (acknowledged write) for more reliable communication
+      await characteristic.writeValue(dataBuffer);
+      console.log('Command sent:', command, dataBuffer);
     } catch (error) {
       console.error('Command error:', error);
       addToast('Failed to send command', 'error');
@@ -646,10 +584,8 @@ const AquariumControlPage: React.FC = () => {
 
     for (const [index, schedule] of schedules.entries()) {
         const { enabled, startTime, endTime, days, action } = schedule;
-        const startTimeStr = startTime.replace(':', '');
-        const endTimeStr = endTime.replace(':', '');
         const daysStr = days.map(d => d ? '1' : '0').join('');
-        const command = `SCHEDULE_ADD:${index},${enabled ? 1 : 0},${startTimeStr},${endTimeStr},${daysStr},${action.type},${action.value.replace('#', '')}`;
+        const command = `SCHEDULE_ADD:${index}:${enabled ? 1 : 0}:${startTime}:${endTime}:${daysStr}:${action.type}:${action.value}`;
         await sendCommand(command);
         await new Promise(resolve => setTimeout(resolve, 50)); // Small delay between commands
     }
