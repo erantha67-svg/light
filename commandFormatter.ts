@@ -1,3 +1,4 @@
+
 import { hexToRgb } from './utils';
 import { Schedule } from './types';
 
@@ -13,17 +14,19 @@ const PRESET_MAP: { [key: string]: number } = {
 const COMMAND_CODES = {
   POWER: 0x01,
   BRIGHTNESS: 0x02,
-  PRESET: 0x03,
-  SOLID_COLOR: 0x04,
-  SPECTRUM: 0x05,
-  SUNRISE: 0x06,
-  SUNSET: 0x07,
-  GRADIENT: 0x08,
+  SET_MODE: 0x03,
   SCHEDULE_CLEAR: 0x10,
   SCHEDULE_ADD: 0x11,
   REQUEST_STATE: 0x20,
   SYNC_TIME: 0x21,
   FACTORY_RESET: 0xFE,
+};
+
+const MODE_SUB_CODES = {
+  PRESET: 0x01,
+  SOLID_COLOR: 0x02,
+  SPECTRUM: 0x03,
+  GRADIENT: 0x04,
 };
 
 const START_BYTE = 0x7E;
@@ -56,35 +59,29 @@ export function formatCommand(command: string): ArrayBuffer {
       payload = [parseInt(params[0], 10)];
       break;
     case 'PRESET':
-      commandCode = COMMAND_CODES.PRESET;
-      payload = [PRESET_MAP[params[0].toLowerCase()] || 0x00];
+      commandCode = COMMAND_CODES.SET_MODE;
+      const presetId = PRESET_MAP[params[0].toLowerCase()] || 0x00;
+      payload = [MODE_SUB_CODES.PRESET, presetId];
       break;
     case 'COLOR_HEX':
-      commandCode = COMMAND_CODES.SOLID_COLOR;
+      commandCode = COMMAND_CODES.SET_MODE;
       const rgbSolid = hexToRgb(`#${params[0]}`);
       if (rgbSolid) {
-        payload = [rgbSolid.r, rgbSolid.g, rgbSolid.b];
+        payload = [MODE_SUB_CODES.SOLID_COLOR, rgbSolid.r, rgbSolid.g, rgbSolid.b];
       }
       break;
     case 'GRADIENT_HEX':
-      commandCode = COMMAND_CODES.GRADIENT;
+      commandCode = COMMAND_CODES.SET_MODE;
       const rgbStart = hexToRgb(`#${params[0]}`);
       const rgbEnd = hexToRgb(`#${params[1]}`);
       if (rgbStart && rgbEnd) {
-        payload = [rgbStart.r, rgbStart.g, rgbStart.b, rgbEnd.r, rgbEnd.g, rgbEnd.b];
+        payload = [MODE_SUB_CODES.GRADIENT, rgbStart.r, rgbStart.g, rgbStart.b, rgbEnd.r, rgbEnd.g, rgbEnd.b];
       }
       break;
     case 'SPECTRUM':
-      commandCode = COMMAND_CODES.SPECTRUM;
-      payload = params.map(p => parseInt(p, 10)); // [r,g,b,w,uv]
-      break;
-    case 'SUNRISE':
-      commandCode = COMMAND_CODES.SUNRISE;
-      payload = [parseInt(params[0], 10)]; // duration
-      break;
-    case 'SUNSET':
-      commandCode = COMMAND_CODES.SUNSET;
-      payload = [parseInt(params[0], 10)]; // duration
+      commandCode = COMMAND_CODES.SET_MODE;
+      const spectrumValues = params.map(p => parseInt(p, 10));
+      payload = [MODE_SUB_CODES.SPECTRUM, ...spectrumValues];
       break;
     case 'SCHEDULE_CLEAR':
       commandCode = COMMAND_CODES.SCHEDULE_CLEAR;
