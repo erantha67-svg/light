@@ -170,7 +170,7 @@ const AquariumControlPage: React.FC = () => {
 
   // Device metadata state
   const [deviceAliases, setDeviceAliases] = useState<{ [key: string]: string }>({});
-  const [currentDeviceAlias, setCurrentDeviceAlias] = useState('');
+  const [deviceAliasInput, setDeviceAliasInput] = useState('');
 
   // Scheduling state
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -351,8 +351,8 @@ const AquariumControlPage: React.FC = () => {
     }
   
     try {
-      await characteristic.writeValueWithoutResponse(dataBuffer);
-      console.log('Command sent via Bluetooth:', command, dataBuffer);
+      await characteristic.writeValue(dataBuffer);
+      console.log('Command sent via Bluetooth (with response):', command, dataBuffer);
     } catch (error) {
       console.error('Bluetooth command error:', error);
       addToast('Failed to send command', 'error');
@@ -417,7 +417,7 @@ const AquariumControlPage: React.FC = () => {
       setTimeout(() => {
         const dataBuffer = formatCommand('REQUEST_STATE');
         if (dataBuffer.byteLength > 0) {
-          writeChar.writeValueWithoutResponse(dataBuffer);
+          writeChar.writeValue(dataBuffer);
         }
       }, 500);
   
@@ -547,8 +547,6 @@ const AquariumControlPage: React.FC = () => {
     setIsScanModalOpen(true);
     setIsScanning(true);
     
-    // The existing function body for startScan seems to be cut off. I will assume it is correct and not modify it.
-    // The following is a placeholder for the logic that was likely there.
     try {
       const scan = await navigator.bluetooth.requestLEScan({
         filters: [{ services: [SERVICE_UUID.toLowerCase()] }],
@@ -562,105 +560,119 @@ const AquariumControlPage: React.FC = () => {
     }
   };
   
-    const handleGenerateAiColor = async () => {
-        if (!aiPrompt.trim()) {
-            addToast('Please enter a description for the AI.', 'info');
-            return;
-        }
+  const handleGenerateAiColor = async () => {
+      if (!aiPrompt.trim()) {
+          addToast('Please enter a description for the AI.', 'info');
+          return;
+      }
 
-        setIsGenerating(true);
-        addToast('✨ Asking the AI for a lighting idea...', 'info');
+      setIsGenerating(true);
+      addToast('✨ Asking the AI for a lighting idea...', 'info');
 
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      try {
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-            const systemInstruction = `You are an expert lighting designer for high-end aquariums. Your task is to translate a user's descriptive prompt into specific lighting parameters for a 5-channel LED light (Red, Green, Blue, White, UV). You must return a single JSON object that conforms to the provided schema. You must choose the BEST lighting type (solid, gradient, or spectrum) to represent the user's prompt.
+          const systemInstruction = `You are an expert lighting designer for high-end aquariums. Your task is to translate a user's descriptive prompt into specific lighting parameters for a 5-channel LED light (Red, Green, Blue, White, UV). You must return a single JSON object that conforms to the provided schema. You must choose the BEST lighting type (solid, gradient, or spectrum) to represent the user's prompt.
 - Use 'spectrum' for complex, nuanced scenes like 'planted tank' or 'reef growth' where specific light frequencies are important.
 - Use 'gradient' for dynamic scenes like 'sunrise' or 'sunset'.
 - Use 'solid' for simple, single-mood prompts like 'calm blue'.
 Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure all spectrum values are integers between 0 and 100. Your response must be only the JSON object.`;
 
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: aiPrompt,
-                config: {
-                    systemInstruction,
-                    responseMimeType: 'application/json',
-                    responseSchema: {
-                        type: Type.OBJECT,
-                        description: "Describes the lighting settings. Exactly one of 'solid', 'gradient', or 'spectrum' must be provided.",
-                        properties: {
-                            solid: {
-                                type: Type.OBJECT,
-                                nullable: true,
-                                description: "A single solid color.",
-                                properties: { color: { type: Type.STRING, description: "A 6-digit hex color code, e.g., '#3b82f6'." } }
-                            },
-                            gradient: {
-                                type: Type.OBJECT,
-                                nullable: true,
-                                description: "A color gradient for dynamic scenes.",
-                                properties: {
-                                    start: { type: Type.STRING, description: "The starting 6-digit hex color code." },
-                                    end: { type: Type.STRING, description: "The ending 6-digit hex color code." }
-                                }
-                            },
-                            spectrum: {
-                                type: Type.OBJECT,
-                                nullable: true,
-                                description: "A full 5-channel spectrum for complex biotopes.",
-                                properties: {
-                                    red: { type: Type.INTEGER, description: "Red channel (0-100)." },
-                                    green: { type: Type.INTEGER, description: "Green channel (0-100)." },
-                                    blue: { type: Type.INTEGER, description: "Blue channel (0-100)." },
-                                    white: { type: Type.INTEGER, description: "White channel (0-100)." },
-                                    uv: { type: Type.INTEGER, description: "UV channel (0-100)." }
-                                },
-                                required: ['red', 'green', 'blue', 'white', 'uv']
-                            }
-                        }
-                    },
-                },
-            });
+          const response = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: aiPrompt,
+              config: {
+                  systemInstruction,
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                      type: Type.OBJECT,
+                      description: "Describes the lighting settings. Exactly one of 'solid', 'gradient', or 'spectrum' must be provided.",
+                      properties: {
+                          solid: {
+                              type: Type.OBJECT,
+                              nullable: true,
+                              description: "A single solid color.",
+                              properties: { color: { type: Type.STRING, description: "A 6-digit hex color code, e.g., '#3b82f6'." } }
+                          },
+                          gradient: {
+                              type: Type.OBJECT,
+                              nullable: true,
+                              description: "A color gradient for dynamic scenes.",
+                              properties: {
+                                  start: { type: Type.STRING, description: "The starting 6-digit hex color code." },
+                                  end: { type: Type.STRING, description: "The ending 6-digit hex color code." }
+                              }
+                          },
+                          spectrum: {
+                              type: Type.OBJECT,
+                              nullable: true,
+                              description: "A full 5-channel spectrum for complex biotopes.",
+                              properties: {
+                                  red: { type: Type.INTEGER, description: "Red channel (0-100)." },
+                                  green: { type: Type.INTEGER, description: "Green channel (0-100)." },
+                                  blue: { type: Type.INTEGER, description: "Blue channel (0-100)." },
+                                  white: { type: Type.INTEGER, description: "White channel (0-100)." },
+                                  uv: { type: Type.INTEGER, description: "UV channel (0-100)." }
+                              },
+                              required: ['red', 'green', 'blue', 'white', 'uv']
+                          }
+                      }
+                  },
+              },
+          });
 
-            const jsonText = response.text.trim();
-            const result = JSON.parse(jsonText);
+          const jsonText = response.text.trim();
+          const result = JSON.parse(jsonText);
 
-            if (result.solid && result.solid.color) {
-                setCustomColorMode('solid');
-                setSolidColor(result.solid.color);
-                sendCommand(`COLOR_HEX:${result.solid.color.substring(1)}`);
-                addToast('AI generated a solid color!', 'success');
-            } else if (result.gradient && result.gradient.start && result.gradient.end) {
-                setCustomColorMode('gradient');
-                setGradientStart(result.gradient.start);
-                setGradientEnd(result.gradient.end);
-                sendCommand(`GRADIENT_HEX:${result.gradient.start.substring(1)}:${result.gradient.end.substring(1)}`);
-                addToast('AI generated a gradient!', 'success');
-            } else if (result.spectrum) {
-                setCustomColorMode('spectrum');
-                const newSpectrum = {
-                    red: result.spectrum.red ?? 0,
-                    green: result.spectrum.green ?? 0,
-                    blue: result.spectrum.blue ?? 0,
-                    white: result.spectrum.white ?? 0,
-                    uv: result.spectrum.uv ?? 0,
-                };
-                setSpectrumValues(newSpectrum);
-                sendCommand(`SPECTRUM:${newSpectrum.red}:${newSpectrum.green}:${newSpectrum.blue}:${newSpectrum.white}:${newSpectrum.uv}`);
-                addToast('AI generated a custom spectrum!', 'success');
-            } else {
-                throw new Error("AI response was not in the expected format.");
-            }
+          if (result.solid && result.solid.color) {
+              setCustomColorMode('solid');
+              setSolidColor(result.solid.color);
+              sendCommand(`COLOR_HEX:${result.solid.color.substring(1)}`);
+              addToast('AI generated a solid color!', 'success');
+          } else if (result.gradient && result.gradient.start && result.gradient.end) {
+              setCustomColorMode('gradient');
+              setGradientStart(result.gradient.start);
+              setGradientEnd(result.gradient.end);
+              sendCommand(`GRADIENT_HEX:${result.gradient.start.substring(1)}:${result.gradient.end.substring(1)}`);
+              addToast('AI generated a gradient!', 'success');
+          } else if (result.spectrum) {
+              setCustomColorMode('spectrum');
+              const newSpectrum = {
+                  red: result.spectrum.red ?? 0,
+                  green: result.spectrum.green ?? 0,
+                  blue: result.spectrum.blue ?? 0,
+                  white: result.spectrum.white ?? 0,
+                  uv: result.spectrum.uv ?? 0,
+              };
+              setSpectrumValues(newSpectrum);
+              sendCommand(`SPECTRUM:${newSpectrum.red}:${newSpectrum.green}:${newSpectrum.blue}:${newSpectrum.white}:${newSpectrum.uv}`);
+              addToast('AI generated a custom spectrum!', 'success');
+          } else {
+              throw new Error("AI response was not in the expected format.");
+          }
 
-        } catch (error) {
-            console.error('AI generation error:', error);
-            addToast('AI failed to generate a color. Please try a different prompt.', 'error');
-        } finally {
-            setIsGenerating(false);
-            setPlaceholderPrompt(placeholderPrompts[Math.floor(Math.random() * placeholderPrompts.length)]);
-        }
-    };
+      } catch (error) {
+          console.error('AI generation error:', error);
+          addToast('AI failed to generate a color. Please try a different prompt.', 'error');
+      } finally {
+          setIsGenerating(false);
+          setPlaceholderPrompt(placeholderPrompts[Math.floor(Math.random() * placeholderPrompts.length)]);
+      }
+  };
+
+  useEffect(() => {
+    if (isDeviceSettingsModalOpen && device) {
+      setDeviceAliasInput(deviceAliases[device.id] || '');
+    }
+  }, [isDeviceSettingsModalOpen, device, deviceAliases]);
+
+  const handleSaveAlias = () => {
+    if (!device) return;
+    const newAliases = { ...deviceAliases, [device.id]: deviceAliasInput };
+    setDeviceAliases(newAliases);
+    localStorage.setItem(DEVICE_ALIASES_KEY, JSON.stringify(newAliases));
+    addToast('Device alias saved!', 'success');
+  };
     
   return (
     <div className="min-h-screen bg-[#0D1117] text-gray-300">
@@ -1031,6 +1043,84 @@ Ensure all color values are valid 6-digit hex codes starting with '#'. Ensure al
         onSync={() => sendCommand('SYNC_TIME')}
         disabled={isControlDisabled}
       />
+
+      <Dialog
+        open={isDeviceSettingsModalOpen}
+        onOpenChange={setIsDeviceSettingsModalOpen}
+        title="Device Settings"
+      >
+        {device ? (
+            <div className="space-y-6 mt-4">
+                <div>
+                    <label className="text-sm font-medium text-gray-400">Device Name</label>
+                    <p>{device.name}</p>
+                </div>
+                <div>
+                    <label className="text-sm font-medium text-gray-400">Device ID</label>
+                    <p className="text-xs font-mono text-gray-500">{device.id}</p>
+                </div>
+                <div>
+                    <label htmlFor="alias" className="text-sm font-medium text-gray-400">Device Alias</label>
+                    <div className="flex gap-2 mt-1">
+                        <input
+                            id="alias"
+                            type="text"
+                            value={deviceAliasInput}
+                            onChange={(e) => setDeviceAliasInput(e.target.value)}
+                            placeholder="e.g., Living Room Tank"
+                            className="w-full font-sans text-sm px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md"
+                        />
+                        <Button onClick={handleSaveAlias} size="sm">Save</Button>
+                    </div>
+                </div>
+                <div className="pt-4 border-t border-white/10 space-y-3">
+                     <h4 className="font-semibold">Advanced</h4>
+                     <div className="flex flex-col sm:flex-row gap-3">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                sendCommand('REQUEST_STATE');
+                                addToast('State sync request sent.', 'info');
+                            }}
+                            className="w-full"
+                        >
+                            <RefreshCwIcon className="w-4 h-4 mr-2" />
+                            Sync State
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full"
+                            onClick={() => setIsFactoryResetConfirmOpen(true)}
+                        >
+                            <AlertTriangleIcon className="w-4 h-4 mr-2" />
+                            Factory Reset
+                        </Button>
+                     </div>
+                </div>
+            </div>
+        ) : (
+            <p className="text-gray-400 mt-4">No device connected.</p>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={isFactoryResetConfirmOpen}
+        onOpenChange={setIsFactoryResetConfirmOpen}
+        title="Confirm Factory Reset"
+        description="This will reset all settings on your device, including schedules. This action cannot be undone."
+      >
+        <div className="mt-6 flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setIsFactoryResetConfirmOpen(false)}>Cancel</Button>
+            <Button onClick={() => {
+                sendCommand('FACTORY_RESET');
+                addToast('Factory reset command sent.', 'info');
+                setIsFactoryResetConfirmOpen(false);
+                setIsDeviceSettingsModalOpen(false);
+            }} className="border-red-500/50 bg-red-500/20 text-red-300 hover:bg-red-500/30">
+                Reset Device
+            </Button>
+        </div>
+      </Dialog>
     </div>
   );
 };
