@@ -22,6 +22,7 @@ const COMMAND_CODES = {
   SCHEDULE_CLEAR: 0x10,
   SCHEDULE_ADD: 0x11,
   REQUEST_STATE: 0x20,
+  SYNC_TIME: 0x21,
   FACTORY_RESET: 0xFE,
 };
 
@@ -123,6 +124,18 @@ export function formatCommand(command: string): ArrayBuffer {
     case 'REQUEST_STATE':
         commandCode = COMMAND_CODES.REQUEST_STATE;
         break;
+    case 'SYNC_TIME':
+      commandCode = COMMAND_CODES.SYNC_TIME;
+      const now = new Date();
+      payload = [
+        now.getFullYear() - 2000,
+        now.getMonth() + 1,
+        now.getDate(),
+        now.getHours(),
+        now.getMinutes(),
+        now.getSeconds()
+      ];
+      break;
     default:
       console.warn(`Unknown command format: ${command}`);
       return new ArrayBuffer(0);

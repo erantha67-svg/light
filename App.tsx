@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Button from './components/Button';
 import Card from './components/Card';
@@ -15,13 +16,17 @@ import {
   CalendarIcon,
   PowerIcon,
   Loader2Icon,
-  CloudIcon,
   PaintbrushIcon,
   SunriseIcon,
   SunsetIcon,
   InfoIcon,
   AlertTriangleIcon,
   RefreshCwIcon,
+  ClockIcon,
+  WifiIcon,
+  ServerIcon,
+  ClipboardIcon,
+  ClipboardCheckIcon,
 } from './components/icons';
 import { PRESETS, SPECTRUM_PRESETS, DEVICE_NAME, SERVICE_UUID, CHARACTERISTIC_UUID } from './constants';
 import { MockBluetoothDevice, MockBluetoothRemoteGATTCharacteristic, Preset, Schedule, SpectrumPreset } from './types';
@@ -30,7 +35,6 @@ import { formatCommand } from './commandFormatter';
 import { parseDeviceResponse, DeviceState } from './responseParser';
 
 const LAST_DEVICE_ID_KEY = 'lastConnectedAquariumDeviceId';
-const BRIDGE_CONFIG_KEY = 'aquariumBridgeConfig';
 const DEVICE_ALIASES_KEY = 'aquariumDeviceAliases';
 const SCHEDULES_KEY = 'aquariumSchedules';
 
@@ -64,6 +68,7 @@ const ColorPicker: React.FC<{ color: string; onChange: (color: string) => void; 
     const { width, left } = hueRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(width, e.clientX - left));
     const newH = x / width;
+    // Fix for: Block-scoped variable 'newHsl' used before its declaration.
     const newHsl: [number, number, number] = [newH, hsl[1], hsl[2]];
     setHsl(newHsl);
     const [r, g, b] = hslToRgb(newHsl[0], newHsl[1], newHsl[2]);
@@ -121,57 +126,149 @@ const ColorPicker: React.FC<{ color: string; onChange: (color: string) => void; 
 
 
 const AquariumControlPage: React.FC = () => {
+  // Bluetooth state
   const [device, setDevice] = useState<MockBluetoothDevice | null>(null);
   const [characteristic, setCharacteristic] = useState<MockBluetoothRemoteGATTCharacteristic | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Device control state
   const [isPowerOn, setIsPowerOn] = useState(false);
   const [brightness, setBrightness] = useState([75]);
   const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [customColorMode, setCustomColorMode] = useState<'solid' | 'gradient' | 'spectrum'>('solid');
+  const [solidColor, setSolidColor] = useState('#3b82f6');
+  const [gradientStart, setGradientStart] = useState('#fb923c');
+  const [gradientEnd, setGradientEnd] = useState('#f472b6');
+  const [spectrumValues, setSpectrumValues] = useState({ red: 100, green: 80, blue: 90, white: 50, uv: 25 });
+  const [gradientDuration, setGradientDuration] = useState(30);
+
+  // UI State
+  const [activeTab, setActiveTab] = useState('controls');
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scannedDevices, setScannedDevices] = useState<MockBluetoothDevice[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [isDisconnectConfirmOpen, setIsDisconnectConfirmOpen] = useState(false);
   const { addToast } = useToast();
-
-  const [isBridgeModeEnabled, setIsBridgeModeEnabled] = useState(false);
-  const [bridgeServerUrl, setBridgeServerUrl] = useState('');
-  const [bridgeApiKey, setBridgeApiKey] = useState('');
-  const [bridgeStatus, setBridgeStatus] = useState<'inactive' | 'connecting' | 'active' | 'error'>('inactive');
-
-  const [customColorMode, setCustomColorMode] = useState<'solid' | 'gradient' | 'spectrum'>('solid');
-  const [solidColor, setSolidColor] = useState('#3b82f6');
-  const [gradientStart, setGradientStart] = useState('#fb923c');
-  const [gradientEnd, setGradientEnd] = useState('#f472b6');
-  const [spectrumValues, setSpectrumValues] = useState({
-    red: 100,
-    green: 80,
-    blue: 90,
-    white: 50,
-    uv: 25,
-  });
-  
   const [hexInputValue, setHexInputValue] = useState(solidColor);
-
   const [isDeviceSettingsModalOpen, setIsDeviceSettingsModalOpen] = useState(false);
+  const [isFactoryResetConfirmOpen, setIsFactoryResetConfirmOpen] = useState(false);
+  const scanRef = useRef<any>(null);
+  
+  // Bridge state (WebRTC)
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const [bridgeStatus, setBridgeStatus] = useState<'inactive' | 'generating' | 'waiting' | 'connecting' | 'connected' | 'error'>('inactive');
+  const [isClientConnectedToBridge, setIsClientConnectedToBridge] = useState(false);
+  const [bridgeOffer, setBridgeOffer] = useState('');
+  const [bridgeAnswer, setBridgeAnswer] = useState('');
+  const [isOfferCopied, setIsOfferCopied] = useState(false);
+  const [isAnswerCopied, setIsAnswerCopied] = useState(false);
+
+  // Device metadata state
   const [deviceAliases, setDeviceAliases] = useState<{ [key: string]: string }>({});
   const [currentDeviceAlias, setCurrentDeviceAlias] = useState('');
-  const [isFactoryResetConfirmOpen, setIsFactoryResetConfirmOpen] = useState(false);
 
+  // Scheduling state
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('controls');
-  const [gradientDuration, setGradientDuration] = useState(30);
+  const [nextEvent, setNextEvent] = useState<{ time: Date; name: string } | null>(null);
+  const [countdown, setCountdown] = useState('');
 
-  const scanRef = useRef<any>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-  
   const tabs = [
     { id: 'controls', label: 'Controls' },
     { id: 'custom', label: 'Custom Color' },
     { id: 'schedules', label: 'Schedules' },
     { id: 'bridge', label: 'Bridge' },
   ];
+  
+  const isControlDisabled = !isPowerOn || (!isConnected && !isClientConnectedToBridge);
+  
+  const updateAppState = (state: Partial<DeviceState>) => {
+    console.log('Updating app state:', state);
+    if (state.power !== undefined) setIsPowerOn(state.power);
+    if (state.brightness !== undefined) setBrightness([state.brightness]);
+    if (state.activePresetId !== undefined) setActivePreset(state.activePresetId);
+    
+    if (state.mode === 'solid' && state.solidColor) {
+        setSolidColor(state.solidColor);
+        setActivePreset(null);
+        setCustomColorMode('solid');
+    } else if (state.mode === 'spectrum' && state.spectrum) {
+        setSpectrumValues(state.spectrum);
+        setActivePreset(null);
+        setCustomColorMode('spectrum');
+    } else if (state.mode === 'preset') {
+        setActivePreset(state.activePresetId);
+    }
+  };
+  
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      if (!schedules || schedules.length === 0) {
+        setNextEvent(null);
+        return;
+      }
+
+      const now = new Date();
+      const currentDay = (now.getDay() + 6) % 7; // Monday = 0
+      let closestEvent: { time: Date; name: string } | null = null;
+
+      for (let i = 0; i < 7; i++) {
+        const checkDay = (currentDay + i) % 7;
+        const checkDate = new Date(now);
+        checkDate.setDate(now.getDate() + i);
+
+        const daySchedules = schedules
+          .filter(s => s.enabled && s.days[checkDay])
+          .flatMap(s => {
+            const [startH, startM] = s.startTime.split(':').map(Number);
+            const startDate = new Date(checkDate);
+            startDate.setHours(startH, startM, 0, 0);
+
+            const [endH, endM] = s.endTime.split(':').map(Number);
+            const endDate = new Date(checkDate);
+            endDate.setHours(endH, endM, 0, 0);
+            
+            return [
+                { time: startDate, name: `Start: ${s.action.name}` },
+                { time: endDate, name: `End: ${s.action.name}` },
+            ];
+          })
+          .filter(e => e.time > now)
+          .sort((a, b) => a.time.getTime() - b.time.getTime());
+
+        if (daySchedules.length > 0) {
+          closestEvent = daySchedules[0];
+          break;
+        }
+      }
+      setNextEvent(closestEvent);
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [schedules]);
+
+  useEffect(() => {
+    if (!nextEvent) {
+      setCountdown('');
+      return;
+    }
+    const intervalId = setInterval(() => {
+      const now = new Date();
+      const diff = nextEvent.time.getTime() - now.getTime();
+      if (diff <= 0) {
+        setCountdown('Now');
+        return;
+      }
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+      setCountdown(
+        `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+      );
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [nextEvent]);
 
   useEffect(() => {
     setHexInputValue(solidColor);
@@ -193,13 +290,6 @@ const AquariumControlPage: React.FC = () => {
 
   useEffect(() => {
     try {
-      const savedConfig = localStorage.getItem(BRIDGE_CONFIG_KEY);
-      if (savedConfig) {
-        const { isEnabled, serverUrl, apiKey } = JSON.parse(savedConfig);
-        setIsBridgeModeEnabled(isEnabled ?? false);
-        setBridgeServerUrl(serverUrl ?? '');
-        setBridgeApiKey(apiKey ?? '');
-      }
       const savedAliases = localStorage.getItem(DEVICE_ALIASES_KEY);
       if (savedAliases) {
         setDeviceAliases(JSON.parse(savedAliases));
@@ -222,8 +312,14 @@ const AquariumControlPage: React.FC = () => {
   }, [schedules]);
 
   const sendCommand = useCallback(async (command: string) => {
+    if (isClientConnectedToBridge && dataChannelRef.current?.readyState === 'open') {
+      const message = JSON.stringify({ type: 'command', command });
+      dataChannelRef.current.send(message);
+      return;
+    }
+    
     if (!characteristic || !isConnected) {
-      addToast('Not connected to device', 'error');
+      addToast('Not connected to a device.', 'error');
       return;
     }
   
@@ -236,35 +332,27 @@ const AquariumControlPage: React.FC = () => {
   
     try {
       await characteristic.writeValueWithoutResponse(dataBuffer);
-      console.log('Command sent:', command, dataBuffer);
+      console.log('Command sent via Bluetooth:', command, dataBuffer);
     } catch (error) {
-      console.error('Command error:', error);
+      console.error('Bluetooth command error:', error);
       addToast('Failed to send command', 'error');
     }
-  }, [characteristic, isConnected, addToast]);
+  }, [characteristic, isConnected, isClientConnectedToBridge, addToast]);
 
   const handleDeviceNotification = useCallback((event: any) => {
     const value = event.target.value;
     if (!value) return;
     
-    console.log('Received notification:', value.buffer);
     const parsedState = parseDeviceResponse(value.buffer);
 
     if (parsedState) {
-        console.log('Parsed state:', parsedState);
-        if (parsedState.power !== undefined) setIsPowerOn(parsedState.power);
-        if (parsedState.brightness !== undefined) setBrightness([parsedState.brightness]);
-        if (parsedState.activePresetId !== undefined) setActivePreset(parsedState.activePresetId);
-        
-        if(parsedState.mode === 'solid' && parsedState.solidColor) {
-            setSolidColor(parsedState.solidColor);
-            setCustomColorMode('solid');
-        } else if(parsedState.mode === 'spectrum' && parsedState.spectrum) {
-            setSpectrumValues(parsedState.spectrum);
-            setCustomColorMode('spectrum');
+        updateAppState(parsedState);
+        if (bridgeStatus === 'connected' && dataChannelRef.current?.readyState === 'open') {
+          const message = JSON.stringify({ type: 'state_update', state: parsedState });
+          dataChannelRef.current.send(message);
         }
     }
-  }, []);
+  }, [bridgeStatus]);
 
   const handleDisconnect = useCallback(() => {
     if(characteristic) {
@@ -303,7 +391,6 @@ const AquariumControlPage: React.FC = () => {
         selectedDevice.addEventListener('gattserverdisconnected', handleDisconnect);
 
         addToast('Syncing device state...', 'info');
-        // A short delay before requesting state to ensure notifications are ready
         setTimeout(() => {
           const dataBuffer = formatCommand('REQUEST_STATE');
           if (dataBuffer.byteLength > 0) {
@@ -404,7 +491,7 @@ const AquariumControlPage: React.FC = () => {
 
   const startScan = async () => {
     if (!navigator.bluetooth) {
-      addToast('Bluetooth not supported. Please use a compatible browser.', 'error');
+      addToast('Bluetooth not supported on this browser. Use Bridge mode instead.', 'error');
       return;
     }
 
@@ -446,64 +533,127 @@ const AquariumControlPage: React.FC = () => {
     connectToSelectedDevice(selectedDevice);
   };
   
-  useEffect(() => {
-    if (isBridgeModeEnabled && isConnected && bridgeServerUrl) {
-        setBridgeStatus('connecting');
-        addToast('Bridge connecting...', 'info');
-
-        const socket = new WebSocket(bridgeServerUrl);
-        socketRef.current = socket;
-
-        socket.onopen = () => {
-            setBridgeStatus('active');
-            addToast('Bridge connection active', 'success');
-            if (bridgeApiKey) {
-                socket.send(JSON.stringify({ type: 'auth', apiKey: bridgeApiKey, deviceId: device?.id }));
-            }
-        };
-
-        socket.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                if (data.command) {
-                    console.log('Received command from bridge:', data.command);
-                    addToast(`Command received: ${data.command}`, 'info');
-                    sendCommand(data.command);
-                }
-            } catch (error) {
-                console.error('Error parsing bridge message:', error);
-            }
-        };
-
-        socket.onerror = (error) => {
-            console.error('Bridge WebSocket error:', error);
-            setBridgeStatus('error');
-            addToast('Bridge connection error', 'error');
-        };
-
-        socket.onclose = () => {
-            setBridgeStatus('inactive');
-            if (socketRef.current) {
-               addToast('Bridge connection closed', 'info');
-            }
-            socketRef.current = null;
-        };
-
-    } else {
-        if (socketRef.current) {
-            socketRef.current.close();
-            socketRef.current = null;
-            setBridgeStatus('inactive');
+  // WebRTC Bridge Logic
+  const createPeerConnection = () => {
+    try {
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      pc.onconnectionstatechange = () => {
+        console.log('Bridge connection state:', pc.connectionState);
+        if (pc.connectionState === 'connected') {
+          addToast('Bridge connection established!', 'success');
+          setBridgeStatus('connected');
+          if(!isConnected) { // This check prevents the bridge client from setting this state
+            setIsClientConnectedToBridge(true);
+          }
+        } else if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+          addToast('Bridge connection lost.', 'error');
+          setBridgeStatus('inactive');
+          setIsClientConnectedToBridge(false);
+          peerConnectionRef.current = null;
         }
+      };
+      return pc;
+    } catch (error) {
+      addToast('WebRTC not supported on this browser.', 'error');
+      setBridgeStatus('error');
+      return null;
     }
+  };
 
-    return () => {
-        if (socketRef.current) {
-            socketRef.current.close();
-            socketRef.current = null;
-        }
+  const startBridge = async () => {
+    setBridgeStatus('generating');
+    addToast('Generating bridge offer...', 'info');
+    const pc = createPeerConnection();
+    if (!pc) return;
+
+    peerConnectionRef.current = pc;
+
+    const dc = pc.createDataChannel('commands');
+    dc.onmessage = (event) => {
+      const { type, command } = JSON.parse(event.data);
+      if (type === 'command') {
+        sendCommand(command);
+      }
     };
-  }, [isBridgeModeEnabled, isConnected, bridgeServerUrl, bridgeApiKey, addToast, sendCommand, device?.id]);
+    dataChannelRef.current = dc;
+
+    pc.onicecandidate = () => {
+      if (pc.iceGatheringState === 'complete' && pc.localDescription) {
+        setBridgeOffer(JSON.stringify(pc.localDescription));
+      }
+    };
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    setBridgeStatus('waiting');
+  };
+
+  const connectToBridge = async () => {
+    if (!bridgeOffer) {
+      addToast('Please paste the offer code first.', 'error');
+      return;
+    }
+    setBridgeStatus('connecting');
+    addToast('Generating answer...', 'info');
+    const pc = createPeerConnection();
+    if (!pc) return;
+
+    peerConnectionRef.current = pc;
+    pc.ondatachannel = (event) => {
+      const dc = event.channel;
+      dc.onmessage = (e) => {
+        const { type, state } = JSON.parse(e.data);
+        if (type === 'state_update') {
+          updateAppState(state);
+        }
+      };
+      dataChannelRef.current = dc;
+    };
+
+    try {
+      await pc.setRemoteDescription(JSON.parse(bridgeOffer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      pc.onicecandidate = () => {
+        if (pc.iceGatheringState === 'complete' && pc.localDescription) {
+          setBridgeAnswer(JSON.stringify(pc.localDescription));
+        }
+      };
+    } catch (e) {
+      addToast('Invalid offer code.', 'error');
+      setBridgeStatus('error');
+    }
+  };
+
+  const completeBridgeConnection = async () => {
+    if (!bridgeAnswer) {
+      addToast('Please paste the answer code first.', 'error');
+      return;
+    }
+    setBridgeStatus('connecting');
+    try {
+      await peerConnectionRef.current?.setRemoteDescription(JSON.parse(bridgeAnswer));
+    } catch (e) {
+      addToast('Invalid answer code.', 'error');
+      setBridgeStatus('error');
+    }
+  };
+  
+  const handleClientDisconnectFromBridge = () => {
+    peerConnectionRef.current?.close();
+    setBridgeOffer('');
+    setBridgeAnswer('');
+    setBridgeStatus('inactive');
+  };
+
+  const copyToClipboard = (text: string, onCopy: (isCopied: boolean) => void) => {
+    navigator.clipboard.writeText(text).then(() => {
+      addToast('Copied to clipboard!', 'success');
+      onCopy(true);
+      setTimeout(() => onCopy(false), 2000);
+    });
+  };
 
   const handlePowerToggle = useCallback(async (checked: boolean) => {
     setIsPowerOn(checked);
@@ -575,34 +725,6 @@ const AquariumControlPage: React.FC = () => {
     }
   };
 
-  const handleSaveBridgeConfig = () => {
-    try {
-      const config = {
-        isEnabled: isBridgeModeEnabled,
-        serverUrl: bridgeServerUrl,
-        apiKey: bridgeApiKey,
-      };
-      localStorage.setItem(BRIDGE_CONFIG_KEY, JSON.stringify(config));
-      addToast('Bridge configuration saved!', 'success');
-    } catch (error) {
-      addToast('Failed to save bridge configuration.', 'error');
-    }
-  };
-
-  const handleBridgeToggle = (enabled: boolean) => {
-    setIsBridgeModeEnabled(enabled);
-    try {
-      const config = {
-        isEnabled: enabled,
-        serverUrl: bridgeServerUrl,
-        apiKey: bridgeApiKey,
-      };
-      localStorage.setItem(BRIDGE_CONFIG_KEY, JSON.stringify(config));
-    } catch (error) {
-      console.error("Failed to save bridge enabled state", error);
-    }
-  };
-
   const handleOpenDeviceSettings = () => {
     if (!device) return;
     setCurrentDeviceAlias(deviceAliases[device.id] || device.name || '');
@@ -649,8 +771,13 @@ const AquariumControlPage: React.FC = () => {
     await sendCommand('REQUEST_STATE');
     addToast('Requesting current state from device...', 'info');
   }, [sendCommand, addToast]);
+  
+  const handleSyncTime = useCallback(async () => {
+    await sendCommand('SYNC_TIME');
+    addToast('Device time synchronized successfully!', 'success');
+  }, [sendCommand, addToast]);
 
-  const displayedDeviceName = (device && deviceAliases[device.id]) || device?.name;
+  const displayedDeviceName = (device && deviceAliases[device.id]) || (isClientConnectedToBridge ? 'Bridge Client' : device?.name);
 
   const isSpectrumPresetActive = (preset: SpectrumPreset) => {
     return (
@@ -685,21 +812,144 @@ const AquariumControlPage: React.FC = () => {
     </div>
   );
 
-  return (
-    <>
-      <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
-        <div className="max-w-2xl w-full mx-auto space-y-6">
-          <div className="text-center space-y-2">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 mb-4">
-              <FishIcon className="w-8 h-8 text-white" />
+  const renderBridgeServerContent = () => {
+    return (
+      <div>
+        <div className="flex items-center gap-4">
+          <ServerIcon className="w-6 h-6 text-white" />
+          <h3 className="text-lg font-semibold text-white">Act as Bridge</h3>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          Allow other devices to control this light through a direct peer-to-peer connection.
+        </p>
+        
+        {bridgeStatus === 'inactive' && (
+          <Button onClick={startBridge} className="w-full mt-6">Start Bridge</Button>
+        )}
+        
+        {(bridgeStatus === 'generating' || bridgeStatus === 'waiting') && bridgeOffer && (
+          <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
+            <h4 className="font-semibold text-white">Step 1: Share Offer Code</h4>
+            <p className="text-sm text-gray-400">Copy this code and paste it into the "Connect to Bridge" section on your other device.</p>
+            <div className="relative">
+              <textarea
+                readOnly
+                value={bridgeOffer}
+                className="w-full h-28 p-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-400 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <Button size="icon" variant="ghost" className="absolute top-2 right-2" onClick={() => copyToClipboard(bridgeOffer, setIsOfferCopied)}>
+                {isOfferCopied ? <ClipboardCheckIcon className="w-4 h-4 text-green-400" /> : <ClipboardIcon className="w-4 h-4" />}
+              </Button>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">Aquarium Light</h1>
-            <p className="text-gray-400">Control your AQ-S lighting system</p>
           </div>
+        )}
 
-          <Card className="p-6">
+        {bridgeStatus === 'waiting' && (
+          <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
+            <h4 className="font-semibold text-white">Step 2: Paste Answer Code</h4>
+            <p className="text-sm text-gray-400">Generate an answer on your other device and paste it here to complete the connection.</p>
+            <textarea
+              value={bridgeAnswer}
+              onChange={(e) => setBridgeAnswer(e.target.value)}
+              placeholder="Paste answer code from client device..."
+              className="w-full h-28 p-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <Button onClick={completeBridgeConnection} className="w-full" disabled={!bridgeAnswer || bridgeStatus === 'connecting'}>
+              {bridgeStatus === 'connecting' ? <Loader2Icon className="w-4 h-4 mr-2 animate-spin"/> : null}
+              Connect
+            </Button>
+          </div>
+        )}
+
+        {bridgeStatus === 'connected' && (
+           <div className="mt-6 pt-6 border-t border-white/10 text-center">
+            <p className="text-green-400 font-semibold">Bridge Connected!</p>
+            <p className="text-sm text-gray-400 mt-2">You can now control the light from your other device.</p>
+             <Button onClick={handleClientDisconnectFromBridge} variant="outline" className="mt-4 border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full sm:w-auto">
+              Disconnect Bridge
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+  
+  const renderBridgeClientContent = () => {
+    return (
+      <div>
+        <div className="flex items-center gap-4">
+          <WifiIcon className="w-6 h-6 text-white" />
+          <h3 className="text-lg font-semibold text-white">Connect to a Bridge</h3>
+        </div>
+        <p className="text-sm text-gray-400 mt-2">
+          Control this light remotely by connecting to a bridge device over your local network.
+        </p>
+
+        {bridgeStatus === 'inactive' && !isClientConnectedToBridge && (
+          <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
+            <h4 className="font-semibold text-white">Step 1: Paste Offer Code</h4>
+            <p className="text-sm text-gray-400">Get the offer code from your Bluetooth-connected device and paste it here.</p>
+            <textarea
+              value={bridgeOffer}
+              onChange={(e) => setBridgeOffer(e.target.value)}
+              placeholder="Paste offer code from server device..."
+              className="w-full h-28 p-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+            />
+            <Button onClick={connectToBridge} className="w-full" disabled={!bridgeOffer}>
+              Generate Answer
+            </Button>
+          </div>
+        )}
+        
+        {(bridgeStatus === 'connecting' || bridgeStatus === 'connected') && bridgeAnswer && !isClientConnectedToBridge && (
+          <div className="mt-6 pt-6 border-t border-white/10 space-y-4">
+            <h4 className="font-semibold text-white">Step 2: Share Answer Code</h4>
+            <p className="text-sm text-gray-400">Copy this answer code and paste it back into your bridge device to establish the connection.</p>
+             <div className="relative">
+              <textarea
+                readOnly
+                value={bridgeAnswer}
+                className="w-full h-28 p-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-400 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
+              />
+              <Button size="icon" variant="ghost" className="absolute top-2 right-2" onClick={() => copyToClipboard(bridgeAnswer, setIsAnswerCopied)}>
+                {isAnswerCopied ? <ClipboardCheckIcon className="w-4 h-4 text-green-400" /> : <ClipboardIcon className="w-4 h-4" />}
+              </Button>
+            </div>
+            <p className="text-center text-gray-400">Waiting for bridge device to connect...</p>
+          </div>
+        )}
+
+        {isClientConnectedToBridge && (
+          <div className="mt-6 pt-6 border-t border-white/10 text-center">
+            <p className="text-green-400 font-semibold">Bridge Connected!</p>
+            <p className="text-sm text-gray-400 mt-2">You now have full control of the light.</p>
+            <Button onClick={handleClientDisconnectFromBridge} variant="outline" className="mt-4 border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300 w-full sm:w-auto">
+              Disconnect from Bridge
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#0D1117] via-[#161B22] to-[#0D1117] p-4 sm:p-6 lg:p-8">
+      <div className="max-w-4xl mx-auto space-y-8">
+        <header className="text-center">
+          <div className="flex items-center justify-center gap-4 mb-2">
+            <FishIcon className="w-8 h-8 text-purple-400" />
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-white bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-500">
+              Aquarium Light Controller
+            </h1>
+          </div>
+          <p className="text-gray-400">Control your AQ-S light system with ease.</p>
+        </header>
+
+        <main>
+          <Card className="p-4 sm:p-6">
             <ConnectionStatus
-              isConnected={isConnected}
+              isConnected={isConnected || isClientConnectedToBridge}
               isConnecting={isConnecting}
               onConnect={startScan}
               onDisconnect={requestDisconnect}
@@ -707,553 +957,358 @@ const AquariumControlPage: React.FC = () => {
               deviceName={displayedDeviceName}
             />
           </Card>
-          
-          <div>
-            <div className="border-b border-[#30363D]">
-              <nav className="-mb-px flex space-x-6" aria-label="Tabs">
-                {tabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`whitespace-nowrap py-4 px-1 border-b-2 text-sm font-medium transition-colors ${
-                      activeTab === tab.id
-                        ? 'border-purple-500 text-purple-400'
-                        : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </nav>
+
+          <Card className="mt-8">
+            <div className="p-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-white">Master Controls</h2>
+                <div className="flex items-center space-x-4">
+                  <span className="text-sm font-medium">Power</span>
+                  <Switch
+                    checked={isPowerOn}
+                    onCheckedChange={handlePowerToggle}
+                    disabled={!isConnected && !isClientConnectedToBridge}
+                  />
+                </div>
+              </div>
+              <div className="mt-6 space-y-2">
+                <div className="flex justify-between items-center">
+                  <label htmlFor="brightness" className="font-medium text-white">Brightness</label>
+                  <Badge variant="outline">{brightness[0]}%</Badge>
+                </div>
+                <Slider
+                  value={brightness}
+                  onValueChange={handleBrightnessChange}
+                  max={100}
+                  step={1}
+                  disabled={isControlDisabled}
+                />
+              </div>
             </div>
 
-            <div className="pt-6">
+            <div className="border-t border-[#30363D] px-2 sm:px-4 py-2 flex justify-center items-center gap-2 overflow-x-auto">
+              {tabs.map(tab => (
+                 <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors whitespace-nowrap
+                    ${activeTab === tab.id
+                      ? 'bg-white/10 text-white'
+                      : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                    }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-6">
               {activeTab === 'controls' && (
-                <div className="space-y-6">
-                  <Card className="p-6 space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <PowerIcon className="w-6 h-6 text-white" />
-                        <h3 className="text-lg font-semibold text-white">Master Power</h3>
-                      </div>
-                      <Switch checked={isPowerOn} onCheckedChange={handlePowerToggle} disabled={!isConnected} />
-                    </div>
-
-                    <div className="space-y-4 pt-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-lg font-semibold text-white">Master Brightness</label>
-                        <Badge variant="outline">{brightness[0]}%</Badge>
-                      </div>
-                      <div className="space-y-2 pt-2">
-                        <Slider value={brightness} onValueChange={handleBrightnessChange} max={100} step={1} disabled={!isConnected || !isPowerOn} className="w-full" />
-                        <div className="flex justify-between text-xs text-gray-400">
-                          <span>0%</span>
-                          <span>50%</span>
-                          <span>100%</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="pt-2">
-                      <h3 className="text-xl font-semibold text-white mb-4">Lighting Presets</h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {PRESETS.map((preset) => (
-                          <PresetButton key={preset.id} preset={preset} isActive={activePreset === preset.id} isDisabled={!isConnected || !isPowerOn} onClick={() => handlePresetSelect(preset)} />
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
-                  
-                   <Card className="p-6 space-y-6">
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold text-white">Sunrise & Sunset Simulation</h3>
-                        <Badge variant="outline">{gradientDuration} min</Badge>
-                      </div>
-                      <p className="text-sm text-gray-400">
-                        Simulate a natural lighting cycle. The light will gradually change over the selected duration.
-                      </p>
-                      <Slider
-                        value={[gradientDuration]}
-                        onValueChange={(value) => setGradientDuration(value[0])}
-                        min={5}
-                        max={60}
-                        step={5}
-                        disabled={!isConnected || !isPowerOn}
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-4">Color Presets</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                    {PRESETS.map(preset => (
+                      <PresetButton
+                        key={preset.id}
+                        preset={preset}
+                        isActive={activePreset === preset.id}
+                        isDisabled={isControlDisabled}
+                        onClick={() => handlePresetSelect(preset)}
                       />
-                      <div className="flex justify-between text-xs text-gray-400">
-                        <span>5 min</span>
-                        <span>60 min</span>
-                      </div>
-                    </div>
-                    <div
-                      className="w-full h-10 rounded-lg border border-white/10"
-                      style={{
-                        background: 'linear-gradient(to right, #1e293b, #f97316, #fde047, #60a5fa, #1e293b)'
-                      }}
-                      aria-label="Sunrise/Sunset Color Preview"
-                    />
-                    <div className="grid grid-cols-2 gap-4 pt-2">
-                      <Button onClick={handleStartSunrise} disabled={!isConnected || !isPowerOn} variant="outline">
-                        <SunriseIcon className="w-4 h-4 mr-2"/>
-                        Start Sunrise
-                      </Button>
-                      <Button onClick={handleStartSunset} disabled={!isConnected || !isPowerOn} variant="outline">
-                        <SunsetIcon className="w-4 h-4 mr-2"/>
-                        Start Sunset
-                      </Button>
-                    </div>
-                  </Card>
+                    ))}
+                  </div>
                 </div>
               )}
               {activeTab === 'custom' && (
-                <Card className="p-6 space-y-6">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                      <PaintbrushIcon className="w-6 h-6 text-white" />
-                      <h3 className="text-lg font-semibold text-white">Custom Color</h3>
-                    </div>
-                    <div className="flex items-center p-1 rounded-lg bg-[#0D1117] border border-[#30363D] self-stretch sm:self-center">
-                      <Button
-                        variant={customColorMode === 'solid' ? 'default' : 'ghost'}
-                        size="sm"
-                        onClick={() => setCustomColorMode('solid')}
-                        className={`w-full ${customColorMode === 'solid' ? 'shadow-md shadow-purple-500/20' : ''}`}
+                <div className="space-y-6">
+                   <div className="flex justify-center bg-[#0D1117] p-1 rounded-lg border border-[#30363D]">
+                    {['solid', 'gradient', 'spectrum'].map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setCustomColorMode(mode as any)}
+                        className={`w-full py-2 px-3 text-sm font-semibold rounded-md transition ${customColorMode === mode ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}
                       >
-                        Solid
-                      </Button>
-                      <Button
-                        variant={customColorMode === 'gradient' ? 'default' : 'ghost'}
-                        size="sm"
-                        onClick={() => setCustomColorMode('gradient')}
-                        className={`w-full ${customColorMode === 'gradient' ? 'shadow-md shadow-purple-500/20' : ''}`}
-                      >
-                        Gradient
-                      </Button>
-                      <Button
-                        variant={customColorMode === 'spectrum' ? 'default' : 'ghost'}
-                        size="sm"
-                        onClick={() => setCustomColorMode('spectrum')}
-                        className={`w-full ${customColorMode === 'spectrum' ? 'shadow-md shadow-purple-500/20' : ''}`}
-                      >
-                        Spectrum
-                      </Button>
-                    </div>
+                        <span className="capitalize">{mode}</span>
+                      </button>
+                    ))}
                   </div>
-                  
-                  <div className="space-y-4 pt-2">
-                    {customColorMode === 'solid' ? (
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <label className="font-semibold text-white">
-                            Color
-                          </label>
-                          <div className="flex items-center gap-2 rounded-lg bg-[#0D1117] border border-[#30363D] px-3 py-1.5 focus-within:ring-2 focus-within:ring-purple-500">
-                            <div className="w-6 h-6 rounded-md border border-white/10" style={{ backgroundColor: solidColor }}></div>
-                            <input
-                              type="text"
-                              value={hexInputValue}
-                              onChange={handleHexInputChange}
-                              onBlur={handleHexInputBlur}
-                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                              className="w-24 bg-transparent text-sm text-gray-300 uppercase font-mono focus:outline-none"
-                              disabled={!isConnected || !isPowerOn}
-                              aria-label="Solid Color Hex Input"
+
+                  {customColorMode === 'solid' && (
+                     <div className="space-y-4">
+                      <ColorPicker color={solidColor} onChange={setSolidColor} disabled={isControlDisabled} />
+                      <div className="flex items-center gap-3">
+                         <input
+                            type="text"
+                            value={hexInputValue}
+                            onChange={handleHexInputChange}
+                            onBlur={handleHexInputBlur}
+                            className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md font-mono"
+                            disabled={isControlDisabled}
+                          />
+                        <div className="w-10 h-10 rounded-md border border-white/20" style={{ backgroundColor: solidColor }}></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {customColorMode === 'gradient' && (
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="font-semibold text-white mb-2">Sunrise Effect</h4>
+                         <div className="flex gap-2 items-center">
+                          <Button onClick={handleStartSunrise} disabled={isControlDisabled} className="w-full">
+                            <SunriseIcon className="mr-2 h-4 w-4" /> Start Sunrise
+                          </Button>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-white mb-2">Sunset Effect</h4>
+                        <div className="flex gap-2 items-center">
+                           <Button onClick={handleStartSunset} disabled={isControlDisabled} className="w-full">
+                            <SunsetIcon className="mr-2 h-4 w-4" /> Start Sunset
+                          </Button>
+                        </div>
+                      </div>
+                      <div>
+                         <label className="font-medium text-white block mb-2">Duration ({gradientDuration} minutes)</label>
+                        <Slider
+                          value={[gradientDuration]}
+                          onValueChange={([val]) => setGradientDuration(val)}
+                          min={5}
+                          max={120}
+                          step={5}
+                          disabled={isControlDisabled}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {customColorMode === 'spectrum' && (
+                     <div className="space-y-4">
+                       <div className="grid grid-cols-3 gap-3">
+                         {SPECTRUM_PRESETS.map(p => (
+                            <SpectrumPresetButton 
+                              key={p.id}
+                              preset={p}
+                              onClick={() => handleSelectSpectrumPreset(p)}
+                              isActive={isSpectrumPresetActive(p)}
+                              isDisabled={isControlDisabled}
                             />
-                          </div>
-                        </div>
-                        <ColorPicker color={solidColor} onChange={setSolidColor} disabled={!isConnected || !isPowerOn} />
-                      </div>
-                    ) : customColorMode === 'gradient' ? (
-                      <div className="grid gap-6 grid-cols-1 sm:grid-cols-2">
-                        <div className="flex items-center gap-3">
-                          <input
-                            id="color1"
-                            type="color"
-                            value={gradientStart}
-                            onChange={(e) => setGradientStart(e.target.value)}
-                            className="w-12 h-12 bg-transparent border-none rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={!isConnected || !isPowerOn}
-                            aria-label="Start Color"
-                          />
-                          <div>
-                            <label htmlFor="color1" className="font-semibold text-white">
-                              Start
-                            </label>
-                            <p className="text-sm text-gray-400 uppercase">
-                              {gradientStart}
-                            </p>
-                          </div>
-                        </div>
-                         <div className="flex items-center gap-3">
-                          <input
-                            id="color2"
-                            type="color"
-                            value={gradientEnd}
-                            onChange={(e) => setGradientEnd(e.target.value)}
-                            className="w-12 h-12 bg-transparent border-none rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={!isConnected || !isPowerOn}
-                            aria-label="End Color"
-                          />
-                          <div>
-                            <label htmlFor="color2" className="font-semibold text-white">
-                              End
-                            </label>
-                            <p className="text-sm text-gray-400 uppercase">
-                              {gradientEnd}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-6">
-                        <div className="space-y-4 pt-2 border-t border-white/10">
-                          <h4 className="text-md font-semibold text-white">Spectrum Presets</h4>
-                          <div className="grid grid-cols-3 gap-3">
-                            {SPECTRUM_PRESETS.map(preset => (
-                              <SpectrumPresetButton
-                                key={preset.id}
-                                preset={preset}
-                                isActive={isSpectrumPresetActive(preset)}
-                                onClick={() => handleSelectSpectrumPreset(preset)}
-                                isDisabled={!isConnected || !isPowerOn}
-                              />
-                            ))}
-                          </div>
-                        </div>
-                        <div className="space-y-6 pt-6 border-t border-white/10">
-                          <SpectrumSlider channel="red" value={spectrumValues.red} onChange={handleSpectrumChange} trackClassName="bg-red-500" disabled={!isConnected || !isPowerOn} />
-                          <SpectrumSlider channel="green" value={spectrumValues.green} onChange={handleSpectrumChange} trackClassName="bg-green-500" disabled={!isConnected || !isPowerOn} />
-                          <SpectrumSlider channel="blue" value={spectrumValues.blue} onChange={handleSpectrumChange} trackClassName="bg-blue-500" disabled={!isConnected || !isPowerOn} />
-                          <SpectrumSlider channel="white" value={spectrumValues.white} onChange={handleSpectrumChange} trackClassName="bg-gray-200" disabled={!isConnected || !isPowerOn} />
-                          <SpectrumSlider channel="uv" value={spectrumValues.uv} onChange={handleSpectrumChange} trackClassName="bg-violet-500" disabled={!isConnected || !isPowerOn} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                         ))}
+                       </div>
+                       <div className="pt-4 border-t border-white/10 space-y-4">
+                        <SpectrumSlider channel="red" value={spectrumValues.red} onChange={handleSpectrumChange} trackClassName="bg-red-500" disabled={isControlDisabled}/>
+                        <SpectrumSlider channel="green" value={spectrumValues.green} onChange={handleSpectrumChange} trackClassName="bg-green-500" disabled={isControlDisabled}/>
+                        <SpectrumSlider channel="blue" value={spectrumValues.blue} onChange={handleSpectrumChange} trackClassName="bg-blue-500" disabled={isControlDisabled}/>
+                        <SpectrumSlider channel="white" value={spectrumValues.white} onChange={handleSpectrumChange} trackClassName="bg-gray-200" disabled={isControlDisabled}/>
+                        <SpectrumSlider channel="uv" value={spectrumValues.uv} onChange={handleSpectrumChange} trackClassName="bg-violet-500" disabled={isControlDisabled}/>
+                       </div>
+                       <div 
+                          className="w-full h-10 rounded-md border border-white/20 transition-colors"
+                          style={{ backgroundColor: calculateSpectrumColor(spectrumValues) }}
+                        />
+                     </div>
+                  )}
 
-                  <div
-                      className="w-full h-10 rounded-lg border border-white/10"
-                      style={{
-                        background: customColorMode === 'solid'
-                          ? solidColor
-                          : customColorMode === 'gradient'
-                          ? `linear-gradient(to right, ${gradientStart}, ${gradientEnd})`
-                          : calculateSpectrumColor(spectrumValues)
-                      }}
-                      aria-label="Color Preview"
-                    ></div>
-
-                  <div className="pt-2">
-                      <Button onClick={handleApplyCustomColor} disabled={!isConnected || !isPowerOn} className="w-full">
-                          {customColorMode === 'spectrum' ? 'Apply Spectrum' : 'Apply Custom Color'}
-                      </Button>
-                  </div>
-                </Card>
+                  {(customColorMode === 'solid' || customColorMode === 'spectrum') && (
+                    <Button onClick={handleApplyCustomColor} disabled={isControlDisabled} className="w-full">
+                      <PaintbrushIcon className="mr-2 h-4 w-4" /> Apply Custom Lighting
+                    </Button>
+                  )}
+                </div>
               )}
               {activeTab === 'schedules' && (
-                <Card className="p-6">
-                   <p className="text-gray-400 mb-4 text-center">Set up automated lighting schedules for different times and days to simulate a natural environment.</p>
-                  <Button variant="outline" className="w-full" onClick={() => setIsScheduleModalOpen(true)}>
-                    <CalendarIcon className="w-4 h-4 mr-2" /> Manage Schedules
+                <div className="space-y-4">
+                   <div className="p-4 rounded-lg bg-white/5 text-center">
+                      <h3 className="font-semibold text-white">Next Scheduled Event</h3>
+                      {nextEvent ? (
+                        <>
+                          <p className="text-gray-300">{nextEvent.name}</p>
+                          <p className="text-2xl font-mono font-bold text-purple-400 mt-1">{countdown}</p>
+                        </>
+                      ) : (
+                         <p className="text-gray-500">No upcoming events.</p>
+                      )}
+                   </div>
+                  <Button
+                    onClick={() => setIsScheduleModalOpen(true)}
+                    variant="outline"
+                    className="w-full"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    Manage Schedules
                   </Button>
-                </Card>
+                </div>
               )}
               {activeTab === 'bridge' && (
-                <Card className="p-6 space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                      <CloudIcon className="w-6 h-6 text-white" />
-                      <h3 className="text-lg font-semibold text-white">Bridge Mode</h3>
-                    </div>
-                    <Switch
-                      checked={isBridgeModeEnabled}
-                      onCheckedChange={handleBridgeToggle}
-                      disabled={!isConnected || !bridgeServerUrl}
-                    />
-                  </div>
-                  <p className="text-sm text-gray-400 -mt-2">
-                    Control your light remotely. This device will act as a bridge, staying connected to the light and listening for commands from the server.
-                  </p>
-
-                  <div className="space-y-4">
-                    <div>
-                      <label htmlFor="serverUrl" className="block text-sm font-medium text-gray-300 mb-2">
-                        Server URL
-                      </label>
-                      <input
-                        id="serverUrl"
-                        type="text"
-                        className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        placeholder="wss://your-bridge-server.com"
-                        value={bridgeServerUrl}
-                        onChange={(e) => setBridgeServerUrl(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="apiKey" className="block text-sm font-medium text-gray-300 mb-2">
-                        API Key
-                      </label>
-                      <input
-                        id="apiKey"
-                        type="password"
-                        className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                        placeholder="Enter your secret API key"
-                        value={bridgeApiKey}
-                        onChange={(e) => setBridgeApiKey(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-300">Status:</span>
-                      <Badge variant={bridgeStatus === 'active' ? 'default' : 'outline'} className={
-                          bridgeStatus === 'active' ? 'bg-green-600/50 border-green-500/50 text-green-300' :
-                          bridgeStatus === 'error' ? 'bg-red-600/50 border-red-500/50 text-red-300' :
-                          ''
-                      }>
-                        {bridgeStatus.charAt(0).toUpperCase() + bridgeStatus.slice(1)}
-                      </Badge>
-                    </div>
-                    <Button onClick={handleSaveBridgeConfig} size="sm">
-                      Save Config
-                    </Button>
-                  </div>
-                </Card>
+                <div>
+                  { (isConnected && !isClientConnectedToBridge) ? renderBridgeServerContent() : renderBridgeClientContent() }
+                </div>
               )}
             </div>
-          </div>
-        </div>
+          </Card>
+        </main>
       </div>
+
       <Dialog
         open={isScanModalOpen}
         onOpenChange={setIsScanModalOpen}
-        title={
-          <div className="flex items-center gap-2">
-            {isScanning && <Loader2Icon className="w-5 h-5 animate-spin" />}
-            {isScanning ? 'Scanning for Devices...' : 'Available Devices'}
-          </div>
-        }
-        description="Select your AQ-S device from the list below, or connect manually."
+        title="Scan for Devices"
+        description="Select your AQ-S device from the list below."
       >
-        <div className="mt-4 space-y-2 max-h-60 overflow-y-auto">
-          {scannedDevices.length > 0 ? (
-            scannedDevices.map((d) => (
-              <button
-                key={d.id}
-                onClick={() => onSelectDevice(d)}
-                className="w-full text-left p-3 bg-white/5 hover:bg-white/10 rounded-lg transition-colors"
-              >
-                {d.name || `Unnamed Device (${d.id.slice(0, 8)}...)`}
-              </button>
-            ))
-          ) : (
-            <div className="text-center text-slate-400 py-8">
-              {isScanning ? 'Listening for advertisements...' : 'No devices found.'}
+        <div className="mt-4 max-h-60 overflow-y-auto space-y-2">
+          {isScanning && scannedDevices.length === 0 && (
+            <div className="flex items-center justify-center p-8 text-gray-400">
+              <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
+              Scanning...
             </div>
           )}
+          {!isScanning && scannedDevices.length === 0 && (
+            <div className="text-center p-8 text-gray-500">No devices found.</div>
+          )}
+          {scannedDevices.map(d => (
+            <button
+              key={d.id}
+              onClick={() => onSelectDevice(d)}
+              className="w-full text-left p-3 rounded-md hover:bg-white/10 transition-colors flex items-center justify-between"
+            >
+              <span>{deviceAliases[d.id] || d.name || 'Unknown Device'}</span>
+              <span className="text-xs text-gray-500">{d.id}</span>
+            </button>
+          ))}
         </div>
-        <div className="mt-6 space-y-3">
-           <Button
-              variant="ghost"
-              onClick={manualConnect}
-              className="w-full"
-            >
-              Connect Manually
-            </Button>
-           <Button
-              variant="outline"
-              onClick={() => {
-                stopScan();
-                setIsScanModalOpen(false);
-              }}
-              className="w-full"
-            >
-              Cancel
-            </Button>
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setIsScanModalOpen(false)}>Cancel</Button>
+          <Button onClick={startScan} disabled={isScanning}>
+             {isScanning ? (
+              <>
+                <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
+                Scanning...
+              </>
+            ) : (
+              'Scan Again'
+            )}
+          </Button>
         </div>
       </Dialog>
+      
       <Dialog
         open={isDisconnectConfirmOpen}
         onOpenChange={setIsDisconnectConfirmOpen}
-        title="Confirm Disconnection"
-        description="Are you sure you want to disconnect? This will also clear the device for auto-reconnection."
+        title="Confirm Disconnect"
+        description="Are you sure you want to disconnect from the device?"
       >
         <div className="mt-6 flex justify-end gap-3">
-           <Button
-              variant="outline"
-              onClick={() => setIsDisconnectConfirmOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={confirmDisconnect}
-            >
-              Disconnect
-            </Button>
+          <Button variant="outline" onClick={() => setIsDisconnectConfirmOpen(false)}>Cancel</Button>
+          <Button onClick={confirmDisconnect} className="bg-red-600 hover:bg-red-700 text-white shadow-red-600/20">Disconnect</Button>
         </div>
       </Dialog>
+      
       <Dialog
         open={isDeviceSettingsModalOpen}
         onOpenChange={setIsDeviceSettingsModalOpen}
         title="Device Settings"
-        description={`Manage settings for ${displayedDeviceName || 'your device'}.`}
       >
-        <div className="mt-4 space-y-6">
-            <div className="space-y-2">
-                <label htmlFor="deviceName" className="block text-sm font-medium text-gray-300">
-                    Device Nickname
-                </label>
-                <input
-                    id="deviceName"
-                    type="text"
-                    className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md text-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    placeholder="e.g., Living Room Light"
-                    value={currentDeviceAlias}
-                    onChange={(e) => setCurrentDeviceAlias(e.target.value)}
-                />
-            </div>
-            <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                    <label className="block text-sm font-medium text-gray-300">
-                        Signal Strength
-                    </label>
-                    <Badge variant="outline">-62 dBm (Excellent)</Badge>
-                </div>
-                <div className="w-full h-2 bg-[#30363D] rounded-full overflow-hidden">
-                    <div 
-                        className="h-full rounded-full bg-gradient-to-r from-green-500 to-teal-400" 
-                        style={{ width: '95%' }}
-                    />
-                </div>
-                <p className="text-xs text-gray-500 pt-1">
-                    A strong signal ensures a stable connection.
-                </p>
-            </div>
-            <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-300">
-                        <InfoIcon className="w-4 h-4" />
-                        Firmware Version
-                    </label>
-                    <Badge variant="outline">v1.2.4</Badge>
-                </div>
-            </div>
-            <div className="pt-4 border-t border-white/10">
-              <details>
-                <summary className="cursor-pointer text-sm font-medium text-gray-300 hover:text-white">
-                  Compliance Information
-                </summary>
-                <div className="mt-4 text-xs text-gray-400 space-y-3 max-h-48 overflow-y-auto pr-2">
-                  <p className="font-semibold text-gray-300">FCC STATEMENT:</p>
-                  <p>This device complies with Part 15 of the FCC Rules. Operation is subject to the following two conditions:</p>
-                  <ol className="list-decimal list-inside space-y-1 pl-2">
-                    <li>This device may not cause harmful interference, and</li>
-                    <li>This device must accept any interference received, including interference that may cause undesired operation.</li>
-                  </ol>
-                  <p className="font-semibold text-gray-300 pt-2">Warning:</p>
-                  <p>Changes or modifications not expressly approved by the party responsible for compliance could void the user’s authority to operate the equipment.</p>
-                  <p className="font-semibold text-gray-300 pt-2">NOTE:</p>
-                  <p>This equipment has been tested and found to comply with the limits for a Class B digital device, pursuant to Part 15 of the FCC Rules. These limits are designed to provide reasonable protection against harmful interference in a residential installation. This equipment generates, uses, and can radiate radio frequency energy and, if not installed and used in accordance with the instructions, may cause harmful interference to radio communications. However, there is no guarantee that interference will not occur in a particular installation. If this equipment does cause harmful interference to radio or television reception, which can be determined by turning the equipment off and on, the user is encouraged to try to correct the interference by one or more of the following measures:</p>
-                  <ul className="list-disc list-inside space-y-1 pl-2">
-                    <li>Reorient or relocate the receiving antenna.</li>
-                    <li>Increase the separation between the equipment and receiver.</li>
-                    <li>Connect the equipment into an outlet on a circuit different from that to which the receiver is connected.</li>
-                    <li>Consult the dealer or an experienced radio/TV technician for help.</li>
-                  </ul>
-                  <p className="font-semibold text-gray-300 pt-2">FCC Radiation Exposure Statement:</p>
-                  <p>This equipment complies with FCC radiation exposure limits set forth for an uncontrolled environment. This equipment should be installed and operated with a minimum distance 20cm between the radiator & your body.</p>
-                </div>
-              </details>
-            </div>
-            <div className="pt-4 border-t border-white/10">
-              <h4 className="text-sm font-medium text-gray-300 mb-3">Device Actions</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                      variant="outline"
-                      onClick={handleSyncState}
-                  >
-                      <RefreshCwIcon className="w-4 h-4 mr-2" />
-                      Sync State
-                  </Button>
-                  <Button
-                      variant="outline"
-                      className="border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                      onClick={() => setIsFactoryResetConfirmOpen(true)}
-                  >
-                      <AlertTriangleIcon className="w-4 h-4 mr-2" />
-                      Factory Reset
-                  </Button>
-              </div>
-              <p className="text-xs text-gray-500 mt-2">
-                  Sync retrieves the current settings from the device. Factory Reset will erase all custom presets and schedules from the device.
-              </p>
-            </div>
-        </div>
-        <div className="mt-8 flex justify-end gap-3">
-            <Button
-                variant="outline"
-                onClick={() => setIsDeviceSettingsModalOpen(false)}
-            >
-                Cancel
-            </Button>
-            <Button
-                onClick={handleSaveDeviceSettings}
-            >
-                Save Changes
-            </Button>
-        </div>
-      </Dialog>
-       <Dialog
-        open={isFactoryResetConfirmOpen}
-        onOpenChange={setIsFactoryResetConfirmOpen}
-        title={
-          <div className="flex items-center gap-2 text-red-400">
-            <AlertTriangleIcon className="w-6 h-6" />
-            Are you absolutely sure?
+        <div className="space-y-6 mt-4">
+          <div>
+            <label className="text-sm font-medium text-gray-300 mb-2 block">Device Alias</label>
+            <input
+              type="text"
+              value={currentDeviceAlias}
+              onChange={(e) => setCurrentDeviceAlias(e.target.value)}
+              placeholder="e.g., Living Room Tank"
+              className="w-full px-3 py-2 bg-[#0D1117] border border-[#30363D] rounded-md"
+            />
           </div>
-        }
-      >
-        <div className="mt-4 space-y-4">
-          <p className="text-gray-400">
-            This action is irreversible. Performing a factory reset will delete all your saved schedules and custom settings from the device, restoring it to its original state.
-          </p>
-          <p className="text-gray-300 font-semibold">
-            Your schedules saved in this app will not be deleted, but you will need to sync them again.
-          </p>
+          <div>
+            <p className="text-sm font-medium text-gray-300 mb-2 block">Signal Strength</p>
+             <div className="flex items-center gap-4">
+              <div className="relative w-full h-2 bg-[#30363D] rounded-full">
+                <div className="absolute top-0 left-0 h-2 rounded-full bg-green-500" style={{ width: '88%' }}></div>
+              </div>
+              <Badge className="bg-green-500/20 text-green-300 border-green-500/30">Excellent</Badge>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">-62 dBm</p>
+          </div>
+           <div>
+             <label className="text-sm font-medium text-gray-300 mb-2 block">Firmware Version</label>
+             <div className="flex items-center gap-2 p-3 rounded-md bg-[#0D1117] border border-[#30363D]">
+               <InfoIcon className="w-4 h-4 text-gray-400" />
+               <p className="text-sm text-gray-300 font-mono">1.2.5-20240515</p>
+             </div>
+           </div>
+          
+           <details className="bg-[#0D1117] border border-[#30363D] rounded-md p-3">
+            <summary className="cursor-pointer font-medium text-sm text-gray-300">Compliance Information</summary>
+            <div className="mt-2 pt-2 border-t border-[#30363D] max-h-32 overflow-y-auto text-xs text-gray-400 space-y-2">
+                <p className="font-semibold">FCC STATEMENT:</p>
+                <p>This device complies with Part 15 of the FCC Rules. Operation is subject to the following two conditions: (1) This device may not cause harmful interference, and (2) this device must accept any interference received, including interference that may cause undesired operation.</p>
+                <p><span className="font-semibold">Warning:</span> Changes or modifications not expressly approved by the party responsible for compliance could void the user’s authority to operate the equipment.</p>
+                <p><span className="font-semibold">NOTE:</span> This equipment has been tested and found to comply with the limits for a Class B digital device, pursuant to Part 15 of the FCC Rules. These limits are designed to provide reasonable protection against harmful interference in a residential installation. This equipment generates, uses and can radiate radio frequency energy and, if not installed and used in accordance with the instructions, may cause harmful interference to radio communications. However, there is no guarantee that interference will not occur in a particular installation. If this equipment does cause harmful interference to radio or television reception, which can be determined by turning the equipment off and on, the user is encouraged to try to correct the interference by one or more of the following measures: Reorient or relocate the receiving antenna. Increase the separation between the equipment and receiver. Connect the equipment into an outlet on a circuit different from that to which the receiver is connected. Consult the dealer or an experienced radio/TV technician for help.</p>
+                <p className="font-semibold">FCC Radiation Exposure Statement:</p>
+                <p>This equipment complies with FCC radiation exposure limits set forth for an uncontrolled environment. This equipment should be installed and operated with a minimum distance 20cm between the radiator & your body.</p>
+            </div>
+           </details>
+
+
+           <div className="pt-4 border-t border-white/10">
+            <h4 className="font-semibold text-white mb-3">Device Actions</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <Button onClick={handleSyncState} variant="outline"><RefreshCwIcon className="w-4 h-4 mr-2" /> Sync State</Button>
+              <Button onClick={handleSyncTime} variant="outline"><ClockIcon className="w-4 h-4 mr-2" /> Sync Time</Button>
+              <Button
+                onClick={() => setIsFactoryResetConfirmOpen(true)}
+                variant="outline"
+                className="col-span-2 border-red-500/50 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <AlertTriangleIcon className="w-4 h-4 mr-2" />
+                Factory Reset
+              </Button>
+            </div>
+           </div>
+
         </div>
-        <div className="mt-8 flex justify-end gap-3">
-           <Button
-              variant="outline"
-              onClick={() => setIsFactoryResetConfirmOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={handleFactoryReset}
-            >
-              Confirm Reset
-            </Button>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="outline" onClick={() => setIsDeviceSettingsModalOpen(false)}>Cancel</Button>
+          <Button onClick={handleSaveDeviceSettings}>Save Settings</Button>
         </div>
       </Dialog>
-      <ScheduleDialog
+      
+       <Dialog
+          open={isFactoryResetConfirmOpen}
+          onOpenChange={setIsFactoryResetConfirmOpen}
+          title={
+            <div className="flex items-center gap-2 text-red-400">
+              <AlertTriangleIcon /> Factory Reset
+            </div>
+          }
+          description="This will erase all settings and schedules from your device. This action cannot be undone."
+       >
+         <div className="mt-6 flex justify-end gap-3">
+           <Button variant="outline" onClick={() => setIsFactoryResetConfirmOpen(false)}>Cancel</Button>
+           <Button onClick={handleFactoryReset} className="bg-red-600 hover:bg-red-700 text-white shadow-red-600/20">
+             Confirm Reset
+           </Button>
+         </div>
+       </Dialog>
+
+       <ScheduleDialog
         open={isScheduleModalOpen}
         onOpenChange={setIsScheduleModalOpen}
         schedules={schedules}
         onSchedulesChange={setSchedules}
         onSync={handleSyncSchedules}
-        disabled={!isConnected}
+        disabled={isControlDisabled}
       />
-    </>
+
+    </div>
   );
 };
 
-export default function App() {
-  return (
-    <ToastProvider>
-      <AquariumControlPage />
-    </ToastProvider>
-  );
-}
+
+const App: React.FC = () => (
+  <ToastProvider>
+    <AquariumControlPage />
+  </ToastProvider>
+);
+
+export default App;
